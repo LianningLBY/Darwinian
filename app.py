@@ -267,17 +267,31 @@ def render_metrics_table():
 # 运行逻辑（在后台线程中执行图）
 # ──────────────────────────────────────────────
 def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
-               model: str, max_loops: int, q: queue.Queue):
+               model: str, provider: str, max_loops: int, q: queue.Queue):
     """在独立线程中运行 LangGraph，通过 queue 向主线程传递状态更新。"""
     try:
-        os.environ["ANTHROPIC_API_KEY"] = api_key
-
-        if model.startswith("claude"):
+        if provider == "Anthropic":
+            os.environ["ANTHROPIC_API_KEY"] = api_key
             from langchain_anthropic import ChatAnthropic
             llm = ChatAnthropic(model=model, max_tokens=8192)
-        else:
+
+        elif provider == "OpenAI":
+            os.environ["OPENAI_API_KEY"] = api_key
             from langchain_openai import ChatOpenAI
             llm = ChatOpenAI(model=model, max_tokens=8192)
+
+        elif provider == "MiniMax":
+            # MiniMax 提供 OpenAI 兼容接口
+            from langchain_openai import ChatOpenAI
+            llm = ChatOpenAI(
+                model=model,
+                api_key=api_key,
+                base_url="https://api.minimax.chat/v1",
+                max_tokens=8192,
+            )
+
+        else:
+            raise ValueError(f"未知 provider: {provider}")
 
         from darwinian.state import ResearchState
         from darwinian.graphs.main_graph import build_main_graph
@@ -448,17 +462,26 @@ with st.sidebar:
     st.divider()
     st.markdown("### 🔑 模型配置")
 
-    model_choice = st.selectbox(
-        "模型",
-        ["claude-opus-4-6", "claude-sonnet-4-6", "gpt-4o", "gpt-4o-mini"],
-        index=0,
-    )
+    PROVIDER_MODELS = {
+        "Anthropic": ["claude-opus-4-6", "claude-sonnet-4-6", "claude-haiku-4-5-20251001"],
+        "OpenAI":    ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"],
+        "MiniMax":   ["MiniMax-Text-01", "abab6.5s-chat", "MiniMax-M2.7"],
+    }
+    PROVIDER_ENV = {
+        "Anthropic": "ANTHROPIC_API_KEY",
+        "OpenAI":    "OPENAI_API_KEY",
+        "MiniMax":   "MINIMAX_API_KEY",
+    }
 
+    provider_choice = st.selectbox("服务商", list(PROVIDER_MODELS.keys()), index=0)
+    model_choice = st.selectbox("模型", PROVIDER_MODELS[provider_choice], index=0)
+
+    env_key = PROVIDER_ENV[provider_choice]
     api_key = st.text_input(
         "API Key",
-        value=os.getenv("ANTHROPIC_API_KEY", ""),
+        value=os.getenv(env_key, ""),
         type="password",
-        placeholder="sk-ant-... 或 sk-...",
+        placeholder=f"{env_key}",
     )
 
     max_loops = st.slider("最大外层循环次数", min_value=1, max_value=10, value=5)
@@ -496,7 +519,7 @@ with st.sidebar:
         # 启动后台线程
         t = threading.Thread(
             target=_run_graph,
-            args=(research_direction, ds, api_key, model_choice, max_loops, st.session_state.log_queue),
+            args=(research_direction, ds, api_key, model_choice, provider_choice, max_loops, st.session_state.log_queue),
             daemon=True,
         )
         t.start()
