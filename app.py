@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 import os
-import time
 import threading
 import queue
 from datetime import datetime
@@ -695,7 +694,6 @@ if st.session_state.final_report:
         mime="text/markdown",
     )
 
-# ── 自动刷新（运行中每 2 秒刷新一次）──
+# ── 自动刷新（运行中持续轮询，不在主线程 sleep 以避免事件循环关闭）──
 if st.session_state.running:
-    time.sleep(2)
     st.rerun()
