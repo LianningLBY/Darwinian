@@ -11,6 +11,7 @@ Agent 1: 瓶颈挖掘机 (bottleneck_miner_node)
 from __future__ import annotations
 
 import json
+import re
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
@@ -66,8 +67,23 @@ def bottleneck_miner_node(state: ResearchState, llm: BaseChatModel) -> dict:
         HumanMessage(content=user_message),
     ])
 
-    # 4. 解析输出
-    result = json.loads(response.content)
+    # 4. 解析输出 - 处理可能的 markdown 代码块或空白响应
+    content = response.content.strip() if response.content else ""
+    
+    if not content:
+        raise ValueError("LLM 返回了空响应")
+    
+    # 移除可能的 markdown 代码块标记
+    json_match = re.search(r'```json\s*(.*?)\s*```', content, re.DOTALL)
+    if json_match:
+        content = json_match.group(1)
+    else:
+        # 尝试直接解析
+        json_match = re.search(r'\{.*\}', content, re.DOTALL)
+        if json_match:
+            content = json_match.group(0)
+    
+    result = json.loads(content)
 
     # 5. 初始化或更新 hypothesis（仅填充 core_problem）
     from darwinian.state import Hypothesis

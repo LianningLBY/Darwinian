@@ -3,7 +3,7 @@
 
 用法：
     # 设置环境变量
-    export ANTHROPIC_API_KEY=your_key_here
+    export MINIMAX_API_KEY=your_key_here
 
     # 运行
     python examples/run_research.py
@@ -11,19 +11,19 @@
 
 import os
 from dotenv import load_dotenv
-from langchain_anthropic import ChatAnthropic
 
 from darwinian.state import ResearchState
 from darwinian.graphs.main_graph import build_main_graph
+from darwinian.llms import ChatMiniMax
 
 load_dotenv()
 
 
 def main():
-    # 初始化 LLM
-    llm = ChatAnthropic(
-        model="claude-opus-4-6",
-        api_key=os.environ["ANTHROPIC_API_KEY"],
+    # 初始化 LLM - 使用 MiniMax M2.7
+    llm = ChatMiniMax(
+        model="MiniMax-M2.7",
+        api_key=os.environ["MINIMAX_API_KEY"],
         max_tokens=8192,
     )
 
