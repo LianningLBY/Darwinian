@@ -156,6 +156,7 @@ def _init_state():
         "log_queue":        queue.Queue(),
         "current_hypothesis": "",
         "critic_verdict":   "",
+        "logs":             [],   # list of (timestamp_str, level, message)
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -233,6 +234,29 @@ def render_failed_ledger():
         )
 
 
+def render_log_console():
+    logs = st.session_state.logs
+    if not logs:
+        st.caption("等待运行...")
+        return
+    level_color = {"info": "#8b949e", "ok": "#3fb950", "warn": "#d29922", "error": "#f85149"}
+    lines = []
+    for ts, level, msg in logs[-60:]:   # 最多显示最近 60 条
+        color = level_color.get(level, "#8b949e")
+        lines.append(
+            f'<span style="color:#555e6b">{ts}</span> '
+            f'<span style="color:{color}">{msg}</span>'
+        )
+    html = (
+        '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;'
+        'padding:12px 14px;height:220px;overflow-y:auto;font-family:monospace;'
+        'font-size:0.78rem;line-height:1.7">'
+        + "<br>".join(lines)
+        + "</div>"
+    )
+    st.markdown(html, unsafe_allow_html=True)
+
+
 def render_metrics_table():
     base = st.session_state.baseline_metrics
     prop = st.session_state.proposed_metrics
@@ -293,6 +317,10 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
         else:
             raise ValueError(f"未知 provider: {provider}")
 
+        q.put(("log", ("info", f"模型: {provider} / {model}")))
+        q.put(("log", ("info", f"研究方向: {research_direction[:60]}")))
+        q.put(("log", ("info", "正在构建 LangGraph 主图...")))
+
         from darwinian.state import ResearchState
         from darwinian.graphs.main_graph import build_main_graph
 
@@ -303,6 +331,8 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
             max_outer_loops=max_loops,
         )
 
+        q.put(("log", ("ok", "图构建完成，开始执行...")))
+
         # 使用 stream 逐节点获取更新
         for chunk in graph.stream(initial_state, stream_mode="updates"):
             q.put(("chunk", chunk))
@@ -312,6 +342,13 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
     except Exception as e:
         import traceback
         q.put(("error", traceback.format_exc()))
+
+
+def _add_log(level: str, message: str):
+    ts = datetime.now().strftime("%H:%M:%S")
+    st.session_state.logs.append((ts, level, message))
+    if len(st.session_state.logs) > 200:
+        st.session_state.logs = st.session_state.logs[-200:]
 
 
 def _apply_chunk(chunk: dict):
@@ -445,17 +482,13 @@ with st.sidebar:
         placeholder="描述你想探索的研究方向...",
     )
 
-    with st.expander("数据集描述（JSON）", expanded=False):
+    with st.expander("数据集描述（可选）", expanded=False):
+        st.caption("留空则由 Agent 4 根据假设自动选择合适的公开数据集")
         dataset_schema_str = st.text_area(
             "dataset_schema",
-            value=json.dumps({
-                "type": "tabular",
-                "task": "binary_classification",
-                "n_samples": 5000,
-                "n_features": 20,
-                "metric": "ROC-AUC",
-            }, ensure_ascii=False, indent=2),
-            height=160,
+            value="",
+            height=120,
+            placeholder='{"type": "tabular", "task": "classification", "metric": "ROC-AUC"}',
             label_visibility="collapsed",
         )
 
@@ -507,6 +540,7 @@ with st.sidebar:
             "outer_loop": 0, "max_loops": max_loops,
             "log_queue": queue.Queue(),
             "current_hypothesis": "", "critic_verdict": "",
+            "logs": [], "_error": "",
         }.items():
             st.session_state[k] = v
 
@@ -558,19 +592,52 @@ if st.session_state.running:
         msg_type, payload = q.get_nowait()
         processed += 1
         if msg_type == "chunk":
-            # 将正在运行的节点标记为 running
             for node_name in payload:
                 aid = _node_to_agent_id(node_name)
                 if aid and st.session_state.agent_status[aid] == "pending":
                     st.session_state.agent_status[aid] = "running"
+                    label = next((n for a, _, n, _ in AGENTS if a == aid), node_name)
+                    _add_log("info", f"→ 开始执行 {label}")
+                elif aid and st.session_state.agent_status[aid] == "running":
+                    label = next((n for a, _, n, _ in AGENTS if a == aid), node_name)
+                    _add_log("ok", f"✓ 完成 {label}")
             _apply_chunk(payload)
+            # 节点完成后追加摘要日志
+            for node_name, update in payload.items():
+                if not isinstance(update, dict):
+                    continue
+                if "critic_verdict" in update and update["critic_verdict"]:
+                    v = update["critic_verdict"]
+                    _add_log("info", f"  审查结论: {v.value if hasattr(v,'value') else v}")
+                if "current_hypothesis" in update and update["current_hypothesis"]:
+                    h = update["current_hypothesis"]
+                    if hasattr(h, "core_problem") and h.core_problem:
+                        _add_log("info", f"  核心问题: {h.core_problem[:80]}")
+                if "experiment_result" in update and update["experiment_result"]:
+                    er = update["experiment_result"]
+                    if hasattr(er, "execution_verdict") and er.execution_verdict:
+                        _add_log("info", f"  执行结果: {er.execution_verdict.value if hasattr(er.execution_verdict,'value') else er.execution_verdict}")
+                if "final_verdict" in update and update["final_verdict"]:
+                    fv = update["final_verdict"]
+                    _add_log("ok" if str(fv) == "publish_ready" else "warn",
+                             f"  最终裁决: {fv.value if hasattr(fv,'value') else fv}")
+                if "failed_ledger" in update:
+                    ledger = update["failed_ledger"]
+                    if ledger:
+                        last = ledger[-1]
+                        summary = last.error_summary if hasattr(last, "error_summary") else str(last)
+                        _add_log("warn", f"  写入账本: {summary[:80]}")
+        elif msg_type == "log":
+            _add_log(payload[0], payload[1])
         elif msg_type == "done":
             st.session_state.running = False
             st.session_state.finished = True
+            _add_log("ok", "━━ 研究流程结束 ━━")
         elif msg_type == "error":
             st.session_state.running = False
             st.session_state.finished = True
             st.session_state["_error"] = payload
+            _add_log("error", f"运行出错: {payload.splitlines()[-1] if payload else '未知错误'}")
 
 # ── 布局：左 Agent 流程 | 右 结果面板 ──
 col_left, col_right = st.columns([1, 1], gap="large")
@@ -579,6 +646,10 @@ with col_left:
     st.markdown("### 🔄 研究流程")
     for agent_id, icon, name, desc in AGENTS:
         render_agent_card(agent_id, icon, name, desc)
+
+    # 实时日志
+    st.markdown("### 🖥️ 运行日志")
+    render_log_console()
 
     # 错误显示
     if "_error" in st.session_state and st.session_state["_error"]:
