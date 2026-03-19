@@ -29,4 +29,4 @@
 
 - [ ] 代码执行沙箱的 Docker 镜像 (`darwinian-sandbox:latest`) 需要手动 build
 - [ ] Agent 间没有实现 token 消耗追踪，`budget_state.remaining_tokens` 暂不自动更新
-- [ ] Phase 2 的 `poison_code` 临时存储在 `dataset_loader_code` 字段中，设计不够清晰，考虑后续在 `ExperimentCode` 中增加 `poison_code` 字段
+- [x] Phase 2 的 `poison_code` 已在 `ExperimentCode` 中增加专用字段，不再借用 `dataset_loader_code`

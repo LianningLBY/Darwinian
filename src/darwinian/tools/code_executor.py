@@ -127,7 +127,6 @@ def _write_code_files(tmpdir: str, code: ExperimentCode, mode: str) -> None:
         f.write(code.dataset_loader_code)
 
     if mode == "poison":
-        # 毒药模式：dataset_loader_code 已被 poison_generator 替换为扰动代码
         with open(os.path.join(tmpdir, "run_poison.py"), "w") as f:
             f.write(_build_poison_runner(code))
     else:
@@ -162,10 +161,7 @@ if result.returncode != 0:
 def _build_poison_runner(code: ExperimentCode) -> str:
     return f"""\
 # Poison / Robustness test runner
-{code.dataset_loader_code}
-
-import json, sys
-# proposed_metrics should be printed by above code
+{code.poison_code}
 """
 
 

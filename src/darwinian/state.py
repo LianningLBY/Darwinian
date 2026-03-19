@@ -102,6 +102,7 @@ class ExperimentCode(BaseModel):
     baseline_code: str = Field(description="基准模型代码")
     proposed_code: str = Field(description="提出方法代码")
     dataset_loader_code: str = Field(description="数据加载代码")
+    poison_code: str = Field(default="", description="Agent 6 生成的扰动测试代码")
     requirements: list[str] = Field(default_factory=list, description="代码依赖的 pip 包")
     retry_count: int = Field(default=0, description="已重试次数，上限 5 次")
 

@@ -106,9 +106,9 @@ def poison_generator_node(state: ResearchState, llm: BaseChatModel) -> dict:
         degradation_rate=0.0,
     )
 
-    # 暂时将 poison_code 注入 experiment_code（后续由 code_execute 执行）
+    # 将毒药代码写入专用字段
     updated_code = state.experiment_code.model_copy(
-        update={"dataset_loader_code": poison_code}
+        update={"poison_code": poison_code}
     ) if state.experiment_code else None
 
     return {
