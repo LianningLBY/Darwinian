@@ -59,7 +59,15 @@ cp .env.example .env
 pytest tests/ -v
 ```
 
-### 启动研究
+### 启动前端界面（推荐）
+
+```bash
+streamlit run app.py
+```
+
+浏览器访问 `http://localhost:8501`，在侧边栏填入研究方向和 API Key 后点击"开始研究"。
+
+### 命令行运行
 
 ```bash
 python examples/run_research.py

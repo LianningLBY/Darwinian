@@ -19,6 +19,7 @@ dependencies = [
     "httpx>=0.27",          # Semantic Scholar API
     "docker>=7.0",          # code execution sandbox
     "python-dotenv>=1.0",
+    "streamlit>=1.35.0",
 ]
 
 [project.optional-dependencies]
