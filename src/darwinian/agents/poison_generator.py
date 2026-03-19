@@ -14,6 +14,7 @@ Agent 6: 毒药数据生成器 (poison_generator_node)
 from __future__ import annotations
 
 import json
+from darwinian.utils.json_parser import parse_llm_json
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
@@ -79,7 +80,7 @@ def poison_generator_node(state: ResearchState, llm: BaseChatModel) -> dict:
         HumanMessage(content=user_message),
     ])
 
-    raw = json.loads(response.content)
+    raw = parse_llm_json(response.content)
     selected_names: list[str] = raw["selected_strategies"]
 
     # 验证策略名称合法性

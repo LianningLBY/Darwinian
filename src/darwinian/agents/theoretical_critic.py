@@ -10,6 +10,7 @@ Agent 3: 理论审查官 (theoretical_critic_node)
 from __future__ import annotations
 
 import json
+from darwinian.utils.json_parser import parse_llm_json
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
@@ -68,7 +69,7 @@ def theoretical_critic_node(state: ResearchState, llm: BaseChatModel) -> dict:
         HumanMessage(content=user_message),
     ])
 
-    result = json.loads(response.content)
+    result = parse_llm_json(response.content)
     verdict = CriticVerdict(result["verdict"])
 
     # 如果 PASS，选定最优分支

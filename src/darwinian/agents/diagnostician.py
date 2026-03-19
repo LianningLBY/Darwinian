@@ -11,6 +11,7 @@ Agent 5: 诊断分析师 (diagnostician_node)
 from __future__ import annotations
 
 import json
+from darwinian.utils.json_parser import parse_llm_json
 import re
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
@@ -65,7 +66,7 @@ STDERR（前 2000 字符）：
         HumanMessage(content=user_message),
     ])
 
-    raw = json.loads(response.content)
+    raw = parse_llm_json(response.content)
     verdict = ExecutionVerdict(raw["verdict"])
 
     updated_result = result.model_copy(update={

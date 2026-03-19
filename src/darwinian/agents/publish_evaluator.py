@@ -11,6 +11,7 @@ Agent 7: 成果验收员 (publish_evaluator_node)
 from __future__ import annotations
 
 import json
+from darwinian.utils.json_parser import parse_llm_json
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
@@ -78,7 +79,7 @@ def publish_evaluator_node(state: ResearchState, llm: BaseChatModel) -> dict:
         HumanMessage(content=user_message),
     ])
 
-    raw = json.loads(response.content)
+    raw = parse_llm_json(response.content)
 
     publish_matrix = PublishMatrix(
         novelty_passed=raw["novelty_passed"],
