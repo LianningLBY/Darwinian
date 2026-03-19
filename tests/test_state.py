@@ -80,12 +80,10 @@ class TestHypothesis:
                 confidence=1.5,  # 超出 [0, 1]
             )
 
-    def test_empty_abstraction_tree_fails(self):
-        with pytest.raises(Exception):
-            Hypothesis(
-                core_problem="test",
-                abstraction_tree=[],  # min_length=1
-            )
+    def test_empty_abstraction_tree_allowed(self):
+        # Agent 1 创建 Hypothesis 时 abstraction_tree 为空是合法的（由 Agent 2 填充）
+        h = Hypothesis(core_problem="test")
+        assert h.abstraction_tree == []
 
 
 class TestResearchState:

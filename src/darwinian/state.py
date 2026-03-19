@@ -78,8 +78,8 @@ class Hypothesis(BaseModel):
     """当前研究假设 — 强类型，Agent 2 必须完整填充所有字段"""
     core_problem: str = Field(description="核心矛盾/待解问题")
     abstraction_tree: list[AbstractionBranch] = Field(
-        description="多维解决思路（至少 2 个分支）",
-        min_length=1,
+        default_factory=list,
+        description="多维解决思路（至少 2 个分支，由 Agent 2 填充）",
     )
     selected_branch: AbstractionBranch | None = Field(
         default=None,
