@@ -25,7 +25,17 @@ def parse_llm_json(content: str) -> dict:
     text = content.strip()
 
     # 剥离推理模型的 <think>...</think> 块（MiniMax / DeepSeek-R1 等）
-    text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
+
+    # 处理未关闭的 <think> 块（无 </think> 结束标签，可能被截断）
+    # JSON 实际输出在思考内容之后，从后往前找第一个以 { 或 [ 开头的行
+    if re.search(r"<think>", text, re.IGNORECASE):
+        lines = text.splitlines()
+        for i in range(len(lines) - 1, -1, -1):
+            stripped_line = lines[i].strip()
+            if stripped_line.startswith("{") or stripped_line.startswith("["):
+                text = "\n".join(lines[i:]).strip()
+                break
 
     # 尝试剥离 markdown 代码块
     # 匹配 ```json ... ``` 或 ``` ... ```
