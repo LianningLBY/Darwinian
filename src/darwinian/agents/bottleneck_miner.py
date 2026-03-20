@@ -51,11 +51,17 @@ def bottleneck_miner_node(state: ResearchState, llm: BaseChatModel) -> dict:
     # 2. 构建 failed_ledger 摘要
     ledger_summary = _format_ledger(state)
 
-    # 3. 调用 LLM
+    # 3. 构建提示词（区分「有文献」和「无文献」两种情况）
+    if papers:
+        literature_section = f"""检索到的文献 Limitations：
+{json.dumps(papers, ensure_ascii=False, indent=2)}"""
+    else:
+        literature_section = """文献检索暂时不可用（网络问题或 API 限流）。
+请根据你对该研究领域的知识，直接分析该方向当前面临的主要瓶颈与核心矛盾。"""
+
     user_message = f"""研究方向：{state.research_direction}
 
-检索到的文献 Limitations：
-{json.dumps(papers, ensure_ascii=False, indent=2)}
+{literature_section}
 
 认知账本（已知失败路径，必须规避）：
 {ledger_summary}

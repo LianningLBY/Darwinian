@@ -54,9 +54,9 @@ def search_papers_with_limitations(
             )
             resp.raise_for_status()
             data = resp.json()
-    except httpx.HTTPError as e:
-        # 网络错误时返回空列表，不中断整个 Graph
-        return [{"title": "API Error", "abstract": str(e), "limitations": "无法检索文献"}]
+    except Exception:
+        # 网络/HTTP 错误时返回空列表，由调用方决定降级策略
+        return []
 
     papers = data.get("data", [])
 
