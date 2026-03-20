@@ -447,6 +447,8 @@ def _init_state():
         "logs":             [],   # list of (timestamp_str, level, message)
         "agent_detail":     {a[0]: {} for a in AGENTS},
         "current_stream":   "",   # 当前 LLM 流式输出缓冲
+        "stream_history":   [],   # 已完成的 LLM 输出历史 [{"agent", "think", "response"}]
+        "_stream_agent":    "",   # 当前正在流式输出的 agent 名称
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1053,6 +1055,8 @@ with st.sidebar:
             "logs": [], "_error": "",
             "agent_detail": {a[0]: {} for a in AGENTS},
             "current_stream": "",
+            "stream_history": [],
+            "_stream_agent": "",
         }.items():
             st.session_state[k] = v
 
@@ -1140,11 +1144,34 @@ if st.session_state.running:
                         summary = last.error_summary if hasattr(last, "error_summary") else str(last)
                         _add_log("warn", f"  写入账本: {summary[:80]}")
         elif msg_type == "stream_start":
+            # 记录当前正在运行的 agent 名称
+            running_name = next(
+                (name for aid, _, name, _ in AGENTS
+                 if st.session_state.agent_status.get(aid) == "running"),
+                "LLM",
+            )
+            st.session_state._stream_agent = running_name
             st.session_state.current_stream = ""
         elif msg_type == "stream_chunk":
             st.session_state.current_stream += payload
         elif msg_type == "stream_end":
-            pass  # 保留最终内容，由下一个 stream_start 清空
+            # 将完成的输出存入历史，拆分 think / response
+            import re as _re2
+            content = st.session_state.current_stream
+            if content.strip():
+                tm = _re2.search(r"<think>([\s\S]*?)</think>([\s\S]*)", content)
+                if tm:
+                    think_part = tm.group(1).strip()
+                    resp_part  = tm.group(2).strip()
+                else:
+                    think_part = ""
+                    resp_part  = content.strip()
+                st.session_state.stream_history.append({
+                    "agent":    st.session_state.get("_stream_agent", "LLM"),
+                    "think":    think_part,
+                    "response": resp_part,
+                })
+            st.session_state.current_stream = ""
         elif msg_type == "log":
             _add_log(payload[0], payload[1])
         elif msg_type == "done":
@@ -1192,10 +1219,37 @@ _section("AGENT PIPELINE")
 for agent_id, icon, name, desc in AGENTS:
     render_agent_card(agent_id, icon, name, desc)
 
-stream_text = st.session_state.get("current_stream", "")
-if stream_text:
-    _section("LIVE OUTPUT")
-    _stream_block(stream_text)
+stream_text    = st.session_state.get("current_stream", "")
+stream_history = st.session_state.get("stream_history", [])
+
+if stream_text or stream_history:
+    _section("LLM OUTPUT TRACE")
+    mono = "'JetBrains Mono','Fira Code','Menlo',monospace"
+    box  = (f"font-size:0.85rem;white-space:pre-wrap;font-family:{mono};"
+            "max-height:340px;overflow-y:auto;line-height:1.75;"
+            "padding:14px 16px;background:#06080f;border:1px solid #1a2035;border-radius:8px;")
+
+    # 已完成的历史条目（全部折叠）
+    for i, entry in enumerate(stream_history):
+        label = f"#{i+1}  {entry['agent']}"
+        with st.expander(label, expanded=False):
+            if entry["think"]:
+                st.markdown(
+                    f'<div style="{box}color:#7a8a9e"><span style="font-size:0.72rem;'
+                    f'color:#5a6a7e;display:block;margin-bottom:8px">⟳ Reasoning</span>'
+                    f'{entry["think"]}</div>',
+                    unsafe_allow_html=True,
+                )
+            if entry["response"]:
+                st.markdown(
+                    f'<div style="{box}color:#9aaabf;margin-top:8px">{entry["response"]}</div>',
+                    unsafe_allow_html=True,
+                )
+
+    # 正在进行的实时流（展开）
+    if stream_text:
+        with st.expander(f"⟳  {st.session_state.get('_stream_agent','LLM')}  — 输出中...", expanded=True):
+            _stream_block(stream_text)
 
 _section("RUNTIME LOG")
 render_log_console()
