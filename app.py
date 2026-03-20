@@ -15,6 +15,7 @@ from datetime import datetime
 from typing import Any
 
 import streamlit as st
+from streamlit_autorefresh import st_autorefresh
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -719,6 +720,6 @@ if st.session_state.final_report:
         mime="text/markdown",
     )
 
-# ── 自动刷新（运行中持续轮询，不在主线程 sleep 以避免事件循环关闭）──
+# ── 自动刷新（运行中每 1.5 秒刷新一次，JS 层定时避免事件循环问题）──
 if st.session_state.running:
-    st.rerun()
+    st_autorefresh(interval=1500, key="running_refresh")
