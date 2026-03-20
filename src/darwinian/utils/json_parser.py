@@ -62,12 +62,68 @@ def parse_llm_json(content: str) -> dict:
     fixed2 = _escape_control_chars_in_strings(fixed)
     try:
         return json.loads(fixed2)
+    except json.JSONDecodeError:
+        pass
+
+    # 修复截断的 JSON（LLM 超出 token 上限导致输出中途中断）
+    # 强制关闭未完成的字符串和嵌套结构
+    fixed3 = _repair_truncated_json(fixed2)
+    try:
+        return json.loads(fixed3)
     except json.JSONDecodeError as e:
         raise json.JSONDecodeError(
             f"LLM 输出无法解析为 JSON。原始内容（前 500 字符）：\n{content[:500]}",
             e.doc,
             e.pos,
         ) from e
+
+
+def _repair_truncated_json(text: str) -> str:
+    """
+    修复因 LLM token 截断导致的不完整 JSON。
+    逐字符扫描，跟踪字符串/对象/数组的开闭状态，
+    在末尾补全缺失的引号和括号。
+    """
+    result: list[str] = []
+    in_string = False
+    escape_next = False
+    stack: list[str] = []   # 记录未关闭的 '{' 或 '['
+
+    for ch in text:
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+            continue
+
+        if ch == "\\" and in_string:
+            result.append(ch)
+            escape_next = True
+            continue
+
+        if ch == '"':
+            in_string = not in_string
+            result.append(ch)
+            continue
+
+        if not in_string:
+            if ch in ("{", "["):
+                stack.append(ch)
+            elif ch == "}" and stack and stack[-1] == "{":
+                stack.pop()
+            elif ch == "]" and stack and stack[-1] == "[":
+                stack.pop()
+
+        result.append(ch)
+
+    # 补全截断处
+    if in_string:
+        result.append('"')   # 关闭未完成的字符串
+
+    # 关闭未完成的嵌套结构（从内到外）
+    for opener in reversed(stack):
+        result.append("}" if opener == "{" else "]")
+
+    return "".join(result)
 
 
 def _escape_control_chars_in_strings(text: str) -> str:
