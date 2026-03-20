@@ -14,7 +14,16 @@ from darwinian.utils.json_parser import parse_llm_json
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
+import re as _re
 from darwinian.state import ResearchState, CriticVerdict, AbstractionBranch
+
+# 元投诉特征：core_problem 描述系统/检索状态而非科研问题
+_META_COMPLAINT_PATTERNS = [
+    r"文献.{0,10}(不匹配|不相关|不可用|检索失败|无法)",
+    r"(检索|API|网络).{0,10}(不可用|失败|超时|限流)",
+    r"无法.{0,15}(分析|基于这些|进行有效)",
+    r"当前.{0,10}(文献|检索|数据).{0,10}(不|无法|缺乏)",
+]
 
 
 SYSTEM_PROMPT = """你是一位严格的理论审查官，专门评估科研方案的数学可行性和新颖性。
@@ -56,6 +65,17 @@ def theoretical_critic_node(state: ResearchState, llm: BaseChatModel) -> dict:
         raise ValueError("theoretical_critic_node 调用前必须先运行 hypothesis_generator_node")
 
     hypothesis = state.current_hypothesis
+
+    # 前置拦截：core_problem 是元投诉（描述检索/系统状态），直接打回 MATH_ERROR
+    core = hypothesis.core_problem
+    if any(_re.search(p, core) for p in _META_COMPLAINT_PATTERNS):
+        return {
+            "current_hypothesis": hypothesis,
+            "critic_verdict": CriticVerdict.MATH_ERROR,
+            "critic_feedback": f"core_problem 描述的是系统状态而非科研问题，需重新生成真实的研究矛盾。原文：{core[:100]}",
+            "last_error_keywords": ["文献检索", "不匹配", "系统状态"],
+            "messages": [],
+        }
     branches_text = json.dumps(
         [b.model_dump() for b in hypothesis.abstraction_tree],
         ensure_ascii=False,

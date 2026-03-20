@@ -85,12 +85,22 @@ def code_architect_node(state: ResearchState, llm: BaseChatModel) -> dict:
         and state.experiment_result is not None
         and state.experiment_code.retry_count > 0
     ):
+        stderr_snippet = state.experiment_result.stderr[:1500]
+        # 提取维度信息，帮助 LLM 精确修复
+        import re as _re
+        dim_hints = ""
+        dims = _re.findall(r"(\d+)\s*[x×,]\s*(\d+)", stderr_snippet)
+        if dims:
+            dim_hints = f"\n⚠️  检测到维度不匹配：{dims}。必须确保 loader → baseline → proposed 的 n_features 一致。"
         retry_context = f"""
-上次代码执行的错误（第 {state.experiment_code.retry_count} 次重试）：
-STDERR: {state.experiment_result.stderr[:1500]}
+⚠️  上次代码执行失败（第 {state.experiment_code.retry_count} 次重试）：
+STDERR: {stderr_snippet}
 诊断结论：{state.experiment_result.diagnosis}
-
-请修复上述错误，不要改变整体方法逻辑。"""
+{dim_hints}
+修复要求：
+1. 所有脚本（loader / baseline / proposed）使用相同的输入维度
+2. 每层矩阵乘法前用 assert 检查 shape
+3. 不要改变整体方法逻辑，只修复错误"""
 
     if state.selected_dataset:
         ds = state.selected_dataset

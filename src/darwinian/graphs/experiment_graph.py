@@ -162,12 +162,24 @@ def write_insufficient_to_ledger(state: ResearchState) -> dict:
     text = f"{hypothesis.core_problem} {branch.algorithm_logic if branch else ''}"
     feature_vector = get_text_embedding(text)
 
+    verdict = state.experiment_result.execution_verdict if state.experiment_result else None
     diagnosis = state.experiment_result.diagnosis if state.experiment_result else "方法效果不足基准"
-    banned_kw = state.last_error_keywords or _extract_method_keywords(branch.name if branch else "")
+
+    # 区分代码 bug 超限 vs 方法本身不足
+    if verdict == ExecutionVerdict.CODE_ERROR:
+        failure_type = "CODE_BUG"
+        # 从 stderr 提取维度/类型关键词，帮助下一轮规避同类错误
+        stderr = state.experiment_result.stderr if state.experiment_result else ""
+        extra_kw = _extract_error_keywords(stderr)
+        banned_kw = list(set((state.last_error_keywords or []) + extra_kw))
+    else:
+        failure_type = "INSUFFICIENT"
+        banned_kw = state.last_error_keywords or _extract_method_keywords(branch.name if branch else "")
+
     record = FailedRecord(
         feature_vector=feature_vector,
         error_summary=diagnosis,
-        failure_type="INSUFFICIENT",
+        failure_type=failure_type,
         iteration=state.outer_loop_count,
         banned_keywords=banned_kw,
     )
@@ -303,3 +315,24 @@ def _extract_method_keywords(method_name: str) -> list[str]:
     import re
     words = re.findall(r"[a-z0-9\u4e00-\u9fff]+", method_name.lower())
     return [w for w in words if len(w) > 2]
+
+
+def _extract_error_keywords(stderr: str) -> list[str]:
+    """从 stderr 中提取维度/类型错误关键词，用于账本 banned_keywords"""
+    import re
+    keywords: list[str] = []
+    # 提取 shape mismatch 中的具体维度数字（如 "64x64 vs 20x64" → ["dim_64", "dim_20"]）
+    dims = re.findall(r"\b(\d+)\s*[x×]\s*(\d+)", stderr)
+    for d1, d2 in dims:
+        keywords += [f"dim_{d1}", f"dim_{d2}"]
+    # 提取常见错误类型关键词
+    for pat, kw in [
+        (r"matmul|matrix multiply", "matmul"),
+        (r"shape mismatch|size mismatch", "shape_mismatch"),
+        (r"RuntimeError", "runtime_error"),
+        (r"IndexError", "index_error"),
+        (r"cuda|CUDA", "cuda"),
+    ]:
+        if re.search(pat, stderr, re.IGNORECASE):
+            keywords.append(kw)
+    return list(set(keywords))[:6]
