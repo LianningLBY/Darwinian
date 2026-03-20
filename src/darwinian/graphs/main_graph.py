@@ -52,7 +52,7 @@ def phase1_result_router(
     if state.budget_state.is_exhausted:
         return "end_budget_exhausted"
 
-    if state.outer_loop_count >= state.max_outer_loops:
+    if state.outer_loop_count > state.max_outer_loops:
         return "end_budget_exhausted"
 
     if (

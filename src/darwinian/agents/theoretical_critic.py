@@ -103,9 +103,13 @@ def theoretical_critic_node(state: ResearchState, llm: BaseChatModel) -> dict:
     verdict = CriticVerdict(result["verdict"])
 
     # 如果 PASS，选定最优分支
+    # 注意：LLM 可能返回 null，必须兜底选第一个分支，否则 phase1_result_router 会误判为失败
     updated_hypothesis = hypothesis.model_copy()
-    if verdict == CriticVerdict.PASS and result.get("selected_branch_name"):
-        selected = _find_branch(hypothesis.abstraction_tree, result["selected_branch_name"])
+    if verdict == CriticVerdict.PASS:
+        branch_name = result.get("selected_branch_name")
+        selected = _find_branch(hypothesis.abstraction_tree, branch_name) if branch_name else None
+        if selected is None and hypothesis.abstraction_tree:
+            selected = hypothesis.abstraction_tree[0]
         updated_hypothesis = hypothesis.model_copy(update={"selected_branch": selected})
 
     return {
