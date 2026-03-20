@@ -303,7 +303,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     display: block;
 }
 .matrix-pass   { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.8px; color: #10b981; text-transform: uppercase; }
-.matrix-pending { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.8px; color: #3d4f63; text-transform: uppercase; }
+.matrix-pending { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.8px; color: #5a6a7e; text-transform: uppercase; }
 
 /* ── Log console ── */
 .log-console {
@@ -625,15 +625,15 @@ def render_log_console():
     level_prefix = {"info": "·", "ok": "·", "warn": "!", "error": "✗"}
     lines = []
     for ts, level, msg in logs[-80:]:
-        color  = level_color.get(level, "#3d4a5c")
+        color  = level_color.get(level, "#6b7a8d")
         prefix = level_prefix.get(level, "·")
         safe_msg = _html_mod.escape(str(msg))
         lines.append(
-            f'<span style="color:#3d4f63;user-select:none">{ts}</span>'
+            f'<span style="color:#5a6a7e;user-select:none">{ts}</span>'
             f'&nbsp;<span style="color:{color}">{prefix}</span>'
             f'&nbsp;<span style="color:{color}">{safe_msg}</span>'
         )
-    body = "<br>".join(lines) if lines else '<span style="color:#3d4f63">waiting for execution...</span>'
+    body = "<br>".join(lines) if lines else '<span style="color:#5a6a7e">waiting for execution...</span>'
     html = (
         '<div class="log-console">'
         '<div class="log-console-header">'
@@ -1173,7 +1173,7 @@ def _stream_block(stream_text: str):
         think_part = think_match.group(1).strip()
         rest_part  = think_match.group(2).strip()
         with st.expander("🤔 Reasoning trace", expanded=False):
-            st.markdown(f'<div style="{base_style}color:#475569">{think_part}</div>',
+            st.markdown(f'<div style="{base_style}color:#7a8a9e">{think_part}</div>',
                         unsafe_allow_html=True)
         if rest_part:
             st.markdown(f'<div style="{base_style}color:#8a9ab0">{rest_part}</div>',
