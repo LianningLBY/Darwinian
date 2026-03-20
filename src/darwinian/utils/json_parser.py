@@ -46,6 +46,14 @@ def parse_llm_json(content: str) -> dict:
 
     try:
         return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # 修复非法反斜杠转义（LLM 在 JSON 字符串中写了 LaTeX 公式如 \mathcal, \sum 等）
+    # JSON 只允许 \" \\ \/ \b \f \n \r \t \uXXXX，其余 \X 均非法
+    fixed = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
+    try:
+        return json.loads(fixed)
     except json.JSONDecodeError as e:
         raise json.JSONDecodeError(
             f"LLM 输出无法解析为 JSON。原始内容（前 500 字符）：\n{content[:500]}",
