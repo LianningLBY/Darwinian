@@ -1,8 +1,9 @@
 """
-固定扰动策略库
+鲁棒性测试固定扰动策略库
 
-按可行性分析建议，Agent 6 从此固定库中「选择+组合」，
-而非完全开放生成扰动代码，确保鲁棒性测试的可量化性和可复现性。
+Agent 6 从此固定库中「选择+组合」，
+覆盖数据质量、分布偏移、对抗扰动、稀疏场景等多个维度，
+确保鲁棒性测试的可量化性和可复现性。
 """
 
 from __future__ import annotations
@@ -157,7 +158,7 @@ def generate_perturbation_code(
 
     return f"""\
 # ============================================================
-# Darwinian 毒药数据测试 — 扰动策略: {strategy_names}
+# Darwinian 鲁棒性测试 — 扰动策略: {strategy_names}
 # ============================================================
 import numpy as np
 import json
@@ -184,9 +185,9 @@ try:
     from proposed import train_model, evaluate_model
     model = train_model(X_train, y_train)
     metrics = evaluate_model(model, X_test, y_test)
-    print(json.dumps({{"model": "proposed_poison", "metrics": metrics, "strategies": "{strategy_names}"}}))
+    print(json.dumps({{"model": "proposed_robustness", "metrics": metrics, "strategies": "{strategy_names}"}}))
 except Exception as e:
-    print(json.dumps({{"model": "proposed_poison", "error": str(e)}}))
+    print(json.dumps({{"model": "proposed_robustness", "error": str(e)}}))
     sys.exit(1)
 """
 

@@ -212,8 +212,8 @@ if result.returncode != 0:
 
 def _build_poison_runner(code: ExperimentCode) -> str:
     return f"""\
-# Poison / Robustness test runner
-{code.poison_code}
+# Robustness test runner
+{code.robustness_code}
 """
 
 

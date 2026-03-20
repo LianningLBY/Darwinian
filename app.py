@@ -441,25 +441,26 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 # Agent 元数据
 # ──────────────────────────────────────────────
 AGENTS = [
-    ("bottleneck_miner",    "🔍", "Agent 1 · 瓶颈挖掘机",    "检索文献，提取 Limitations，识别核心矛盾"),
-    ("hypothesis_generator","💡", "Agent 2 · 方案合成器",    "生成跨域解决思路，输出强类型假设对象"),
-    ("theoretical_critic",  "⚖️",  "Agent 3 · 理论审查官",    "审查数学可行性与新颖性，输出 PASS/MATH_ERROR/NOT_NOVEL"),
-    ("code_architect",      "🏗️",  "Agent 4 · 代码架构师",    "编写 Baseline + Proposed Method 实验代码"),
-    ("diagnostician",       "🩺", "Agent 5 · 诊断分析师",    "区分 code_bug vs logic_flaw，驱动修复循环"),
-    ("poison_generator",    "☠️",  "Agent 6 · 毒药数据生成器","从策略库选择扰动组合，生成对抗性测试代码"),
-    ("publish_evaluator",   "🏆", "Agent 7 · 成果验收员",    "终局裁判，更新 publish_matrix，生成研究报告"),
+    ("bottleneck_miner",      "🔍", "Agent 1 · 瓶颈挖掘机",      "检索 20 篇文献，提取 Limitations，归纳共同盲点"),
+    ("hypothesis_generator",  "💡", "Agent 2 · 方案合成器",      "生成跨域解决思路，输出强类型假设对象"),
+    ("theoretical_critic",    "⚖️",  "Agent 3 · 理论审查官",      "严格审查数学可行性与新颖性"),
+    ("code_architect",        "🏗️",  "Agent 4 · 代码架构师",      "生成 Baseline / Proposed / 消融实验代码（多 seed）"),
+    ("diagnostician",         "🩺", "Agent 5 · 诊断分析师",      "区分 code_bug vs logic_flaw，驱动修复循环"),
+    ("robustness_generator",  "🛡️", "Agent 6 · 鲁棒性测试生成器","选择多维扰动策略，生成鲁棒性测试代码"),
+    ("publish_evaluator",     "🏆", "Agent 7 · 成果验收员",      "三审稿人模拟，整合消融+鲁棒性结果，生成报告"),
 ]
 
 # 每个 Agent 的 LLM 具体任务说明（显示在 OUTPUT TRACE 中）
 AGENT_TASKS: dict[str, str] = {
-    "bottleneck_miner":     "📚 文献检索 · 提取研究局限性 · 识别核心矛盾",
-    "hypothesis_generator": "💡 跨域假设生成 · 构建解决方案树",
-    "theoretical_critic":   "⚖️ 数学可行性审查 · 新颖性验证",
-    "code_architect":       "🏗️ 实验代码生成 · 基准方法 vs 提出方案",
-    "diagnostician":        "🩺 错误诊断 · 区分代码缺陷与逻辑缺陷",
-    "poison_generator":     "☠️ 对抗性数据生成 · 鲁棒性测试",
-    "publish_evaluator":    "🏆 结果验收 · 发表可行性评估 · 生成报告",
-    "dataset_finder":       "🗄️ 数据集搜索 · 匹配最优数据集",
+    "bottleneck_miner":      "📚 文献检索（20篇）· 提取研究局限性 · 识别核心矛盾",
+    "hypothesis_generator":  "💡 跨域假设生成 · 构建解决方案树",
+    "theoretical_critic":    "⚖️ 数学可行性审查 · 严格新颖性验证",
+    "code_architect":        "🏗️ 实验代码生成 · 多seed统计 · 消融实验",
+    "diagnostician":         "🩺 错误诊断 · 区分代码缺陷与逻辑缺陷",
+    "robustness_generator":  "🛡️ 多维鲁棒性测试 · 分布偏移 · 对抗扰动",
+    "poison_generator":      "🛡️ 多维鲁棒性测试 · 分布偏移 · 对抗扰动",  # 兼容旧名
+    "publish_evaluator":     "🏆 三审稿人评审 · 消融验证 · 发表可行性评估",
+    "dataset_finder":        "🗄️ 数据集搜索 · 匹配最优数据集",
 }
 
 # ──────────────────────────────────────────────

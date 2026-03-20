@@ -102,7 +102,8 @@ class ExperimentCode(BaseModel):
     baseline_code: str = Field(description="基准模型代码")
     proposed_code: str = Field(description="提出方法代码")
     dataset_loader_code: str = Field(description="数据加载代码")
-    poison_code: str = Field(default="", description="Agent 6 生成的扰动测试代码")
+    ablation_code: str = Field(default="", description="消融实验代码（逐一去掉各组件验证贡献）")
+    robustness_code: str = Field(default="", description="Agent 6 生成的鲁棒性测试代码")
     requirements: list[str] = Field(default_factory=list, description="代码依赖的 pip 包")
     retry_count: int = Field(default=0, description="已重试次数，上限 5 次")
 
@@ -117,11 +118,15 @@ class ExperimentResult(BaseModel):
     diagnosis: str = Field(default="", description="Agent 5 的诊断说明")
 
 
-class PoisonTestResult(BaseModel):
-    """毒药数据测试结果"""
+class RobustnessResult(BaseModel):
+    """鲁棒性测试结果"""
     perturbation_strategy: str = Field(description="使用的扰动策略名称")
     perturbed_metrics: dict[str, float] = Field(default_factory=dict)
     degradation_rate: float = Field(default=0.0, description="性能下降比例")
+
+
+# 向后兼容别名
+PoisonTestResult = RobustnessResult
 
 
 class PublishMatrix(BaseModel):
@@ -188,8 +193,14 @@ class ResearchState(BaseModel):
     experiment_code: ExperimentCode | None = Field(default=None)
     experiment_result: ExperimentResult | None = Field(default=None)
 
-    # 毒药测试
-    poison_test_result: PoisonTestResult | None = Field(default=None)
+    # 鲁棒性测试
+    robustness_result: RobustnessResult | None = Field(default=None)
+
+    # 消融实验结果 {变体名称: 指标字典}，由消融执行节点填充
+    ablation_results: dict[str, dict] = Field(default_factory=dict, description="各消融变体的指标结果")
+
+    # 同伴评审分数（模拟三位审稿人）
+    peer_review_scores: dict[str, Any] = Field(default_factory=dict, description="模拟审稿人评分")
 
     # 发表指标矩阵
     publish_matrix: PublishMatrix = Field(default_factory=PublishMatrix)

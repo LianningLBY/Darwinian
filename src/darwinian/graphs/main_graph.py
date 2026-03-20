@@ -99,7 +99,7 @@ def save_results_node(state: ResearchState) -> dict:
         "publish_matrix": state.publish_matrix.model_dump(),
         "baseline_metrics": state.experiment_result.baseline_metrics if state.experiment_result else {},
         "proposed_metrics": state.experiment_result.proposed_metrics if state.experiment_result else {},
-        "poison_metrics": state.poison_test_result.perturbed_metrics if state.poison_test_result else {},
+        "robustness_metrics": state.robustness_result.perturbed_metrics if state.robustness_result else {},
         "outer_loops": state.outer_loop_count,
         "failed_ledger_size": len(state.failed_ledger),
     }
