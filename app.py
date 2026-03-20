@@ -15,8 +15,13 @@ from datetime import datetime
 from typing import Any
 
 import streamlit as st
-from streamlit_autorefresh import st_autorefresh
 from dotenv import load_dotenv
+
+try:
+    from streamlit_autorefresh import st_autorefresh as _st_autorefresh
+    _HAS_AUTOREFRESH = True
+except ModuleNotFoundError:
+    _HAS_AUTOREFRESH = False
 
 load_dotenv()
 
@@ -720,6 +725,10 @@ if st.session_state.final_report:
         mime="text/markdown",
     )
 
-# ── 自动刷新（运行中每 1.5 秒刷新一次，JS 层定时避免事件循环问题）──
+# ── 自动刷新 ──
 if st.session_state.running:
-    st_autorefresh(interval=1500, key="running_refresh")
+    if _HAS_AUTOREFRESH:
+        _st_autorefresh(interval=1500, key="running_refresh")
+    elif not st.session_state.log_queue.empty():
+        # 备用方案：只有 queue 有新数据时才 rerun，避免空转导致 RuntimeStoppedError
+        st.rerun()
