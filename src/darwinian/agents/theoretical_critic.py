@@ -66,7 +66,17 @@ def theoretical_critic_node(state: ResearchState, llm: BaseChatModel) -> dict:
 
     hypothesis = state.current_hypothesis
 
-    # 前置拦截：core_problem 是元投诉（描述检索/系统状态），直接打回 MATH_ERROR
+    # 前置拦截①：abstraction_tree 为空，说明 Agent 2 未生成任何方案，直接打回
+    if not hypothesis.abstraction_tree:
+        return {
+            "current_hypothesis": hypothesis,
+            "critic_verdict": CriticVerdict.MATH_ERROR,
+            "critic_feedback": "方案合成器未生成任何解决方案分支（abstraction_tree 为空），需要重新生成。",
+            "last_error_keywords": [],
+            "messages": [],
+        }
+
+    # 前置拦截②：core_problem 是元投诉（描述检索/系统状态），直接打回 MATH_ERROR
     core = hypothesis.core_problem
     if any(_re.search(p, core) for p in _META_COMPLAINT_PATTERNS):
         return {

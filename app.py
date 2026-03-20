@@ -1203,6 +1203,13 @@ if st.session_state.running:
                     h = update["current_hypothesis"]
                     if hasattr(h, "core_problem") and h.core_problem:
                         _add_log("info", f"  核心问题: {h.core_problem[:80]}")
+                    # 诊断：显示 selected_branch 与 abstraction_tree 状态
+                    branches_n = len(h.abstraction_tree) if hasattr(h, "abstraction_tree") else 0
+                    has_branch = h.selected_branch is not None if hasattr(h, "selected_branch") else False
+                    if branches_n == 0:
+                        _add_log("warn", f"  ⚠ abstraction_tree 为空，将触发重试")
+                    elif has_branch:
+                        _add_log("info", f"  ✓ 已选定方案分支（共 {branches_n} 个）")
                 if "experiment_result" in update and update["experiment_result"]:
                     er = update["experiment_result"]
                     if hasattr(er, "execution_verdict") and er.execution_verdict:

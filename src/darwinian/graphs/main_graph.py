@@ -61,6 +61,14 @@ def phase1_result_router(
     ):
         return "phase2"
 
+    # 记录具体原因，便于诊断（通过 print 在线程中输出，会出现在 stderr）
+    if state.current_hypothesis is None:
+        print("[phase1_router] current_hypothesis is None → end_budget_exhausted")
+    else:
+        branches = len(state.current_hypothesis.abstraction_tree)
+        selected = state.current_hypothesis.selected_branch
+        print(f"[phase1_router] selected_branch={selected} abstraction_tree.len={branches} → end_budget_exhausted")
+
     return "end_budget_exhausted"
 
 
