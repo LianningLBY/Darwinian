@@ -293,12 +293,17 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
                model: str, provider: str, max_loops: int, q: queue.Queue):
     """在独立线程中运行 LangGraph，通过 queue 向主线程传递状态更新。"""
     try:
-        try:
-            import pydantic_core  # noqa: F401
-        except ModuleNotFoundError:
+        missing = []
+        for pkg, imp in [("pydantic", "pydantic"), ("pydantic-core", "pydantic_core")]:
+            try:
+                __import__(imp)
+            except ModuleNotFoundError:
+                missing.append(pkg)
+        if missing:
             q.put(("error",
-                "缺少 pydantic-core，请在终端运行：\n"
-                "  pip install pydantic-core\n"
+                f"缺少依赖包：{', '.join(missing)}\n"
+                f"请在终端运行：\n"
+                f"  pip install {' '.join(missing)}\n"
                 "安装后重启 Streamlit 即可。"
             ))
             return
