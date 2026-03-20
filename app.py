@@ -94,47 +94,43 @@ section[data-testid="stSidebar"] { background: #0a0d14 !important; border-right:
 /* ── Agent 卡片 ── */
 .agent-card {
     display: flex; align-items: flex-start; gap: 14px;
-    padding: 14px 16px;
+    padding: 12px 14px 12px 0;
     border-radius: 10px;
     margin-bottom: 6px;
     border: 1px solid #1e2330;
+    border-left: 3px solid #1e2330;
     background: #0d1017;
-    transition: all 0.25s ease;
-    position: relative; overflow: hidden;
+    transition: border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
 }
-.agent-card::before {
-    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
-    width: 3px; background: transparent;
-    transition: background 0.25s;
-}
-.agent-card.running::before  { background: linear-gradient(180deg, #6366f1, #8b5cf6); }
-.agent-card.done::before     { background: linear-gradient(180deg, #10b981, #059669); }
-.agent-card.error::before    { background: #ef4444; }
-
 .agent-card.running {
     border-color: rgba(99,102,241,0.35);
+    border-left-color: #6366f1;
     background: linear-gradient(135deg, #0d1017 0%, #0f1128 100%);
-    box-shadow: 0 0 0 1px rgba(99,102,241,0.1), 0 4px 24px rgba(99,102,241,0.06);
+    box-shadow: 0 0 0 1px rgba(99,102,241,0.08), 0 4px 20px rgba(99,102,241,0.05);
 }
-.agent-card.running .agent-name { color: #a5b4fc; }
-.agent-card.done   { border-color: rgba(16,185,129,0.25); }
-.agent-card.done .agent-name   { color: #6ee7b7; }
-.agent-card.error  { border-color: rgba(239,68,68,0.3); }
+.agent-card.done  { border-color: rgba(16,185,129,0.2); border-left-color: #10b981; }
+.agent-card.error { border-color: rgba(239,68,68,0.25); border-left-color: #ef4444; }
 .agent-card.pending { opacity: 0.38; }
 
+.agent-card.running .agent-name { color: #a5b4fc; }
+.agent-card.done    .agent-name { color: #6ee7b7; }
+
 .agent-icon {
-    font-size: 1.25rem; line-height: 1;
-    width: 36px; height: 36px; border-radius: 8px;
+    font-size: 1.2rem; line-height: 1;
+    width: 34px; height: 34px; border-radius: 8px;
     background: #131820; display: flex; align-items: center;
-    justify-content: center; flex-shrink: 0; margin-top: 1px;
+    justify-content: center; flex-shrink: 0; margin-top: 1px; margin-left: 12px;
     border: 1px solid #1e2330;
 }
 .agent-card.running .agent-icon { background: #131828; border-color: rgba(99,102,241,0.3); }
 .agent-card.done    .agent-icon { background: #0b1a14; border-color: rgba(16,185,129,0.2); }
 
-.agent-name { font-weight: 600; font-size: 0.88rem; color: #cbd5e1; letter-spacing: 0.1px; }
-.agent-desc { font-size: 0.76rem; color: #334155; margin-top: 3px; }
-.agent-status-row { display: flex; align-items: center; gap: 8px; }
+.agent-name {
+    font-weight: 600; font-size: 0.88rem; color: #cbd5e1; letter-spacing: 0.1px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.agent-desc { font-size: 0.76rem; color: #334155; margin-top: 3px; line-height: 1.4; }
+.agent-status-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
 
 /* running 脉冲点 */
 .pulse-dot {
@@ -340,6 +336,10 @@ def render_header():
 
 def _render_agent_detail(agent_id: str) -> str:
     """把 agent_detail[agent_id] 渲染为 HTML 片段。"""
+    import html as _html
+    def _e(s: str) -> str:          # HTML-escape 防止 LLM 内容破坏结构
+        return _html.escape(str(s))
+
     d = st.session_state.agent_detail.get(agent_id, {})
     if not d:
         return ""
@@ -348,43 +348,43 @@ def _render_agent_detail(agent_id: str) -> str:
     if agent_id == "bottleneck_miner":
         if d.get("core_problem"):
             parts.append(f'<div class="ad-row"><span class="ad-label">核心矛盾</span>'
-                         f'<span class="ad-value">{d["core_problem"]}</span></div>')
+                         f'<span class="ad-value">{_e(d["core_problem"])}</span></div>')
         for ev in d.get("evidence", [])[:3]:
-            parts.append(f'<div class="ad-ev">📄 {ev}</div>')
+            parts.append(f'<div class="ad-ev">📄 {_e(ev)}</div>')
 
     elif agent_id == "hypothesis_generator":
         for h in d.get("hypotheses", []):
-            parts.append(f'<div class="ad-hyp"><span class="ad-hyp-name">{h["name"]}</span>'
-                         f'<span class="ad-hyp-desc">{h["desc"]}</span></div>')
+            parts.append(f'<div class="ad-hyp"><span class="ad-hyp-name">{_e(h["name"])}</span>'
+                         f'<span class="ad-hyp-desc">{_e(h["desc"])}</span></div>')
 
     elif agent_id == "theoretical_critic":
         verdict = d.get("verdict", "")
         vcls = {"PASS": "ad-pass", "MATH_ERROR": "ad-fail", "NOT_NOVEL": "ad-warn"}.get(verdict, "")
         parts.append(f'<div class="ad-row"><span class="ad-label">裁决</span>'
-                     f'<span class="ad-badge {vcls}">{verdict}</span></div>')
+                     f'<span class="ad-badge {vcls}">{_e(verdict)}</span></div>')
         if d.get("feedback"):
-            parts.append(f'<div class="ad-feedback">{d["feedback"][:200]}</div>')
+            parts.append(f'<div class="ad-feedback">{_e(d["feedback"][:200])}</div>')
 
     elif agent_id == "code_architect":
         if d.get("dataset"):
             parts.append(f'<div class="ad-row"><span class="ad-label">数据集</span>'
-                         f'<span class="ad-value">{d["dataset"]}</span></div>')
+                         f'<span class="ad-value">{_e(d["dataset"])}</span></div>')
         if d.get("method"):
             parts.append(f'<div class="ad-row"><span class="ad-label">方法</span>'
-                         f'<span class="ad-value">{d["method"]}</span></div>')
+                         f'<span class="ad-value">{_e(d["method"])}</span></div>')
 
     elif agent_id == "diagnostician":
         verdict = d.get("verdict", "")
         vcls = {"SUCCESS": "ad-pass", "CODE_BUG": "ad-warn", "LOGIC_FLAW": "ad-fail"}.get(verdict, "")
         parts.append(f'<div class="ad-row"><span class="ad-label">诊断</span>'
-                     f'<span class="ad-badge {vcls}">{verdict}</span></div>')
+                     f'<span class="ad-badge {vcls}">{_e(verdict)}</span></div>')
         if d.get("diagnosis"):
-            parts.append(f'<div class="ad-feedback">{d["diagnosis"][:200]}</div>')
+            parts.append(f'<div class="ad-feedback">{_e(d["diagnosis"][:200])}</div>')
 
     elif agent_id == "poison_generator":
         if d.get("strategy"):
             parts.append(f'<div class="ad-row"><span class="ad-label">扰动策略</span>'
-                         f'<span class="ad-value">{d["strategy"]}</span></div>')
+                         f'<span class="ad-value">{_e(d["strategy"])}</span></div>')
 
     elif agent_id == "publish_evaluator":
         verdict = d.get("verdict", "")
@@ -413,7 +413,7 @@ def render_agent_card(agent_id: str, icon: str, name: str, desc: str):
     st.markdown(f"""
     <div class="agent-card {status}">
         <div class="agent-icon">{icon}</div>
-        <div style="flex:1;min-width:0">
+        <div style="flex:1;min-width:0;padding-right:14px">
             <div class="agent-status-row">
                 <span class="agent-name">{name}</span>
                 {status_html}
