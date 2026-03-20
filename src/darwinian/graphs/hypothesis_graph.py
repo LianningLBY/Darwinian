@@ -51,6 +51,10 @@ def preprocess_node(state: ResearchState) -> dict:
         "critic_verdict": None,
         "critic_feedback": "",
         "current_hypothesis": None,
+        # 重置实验代码/结果，避免 retry_count 跨外层循环累积
+        # 不重置会导致：上轮 retry_count=5 → 新轮第一次 code_error 就被判为 INSUFFICIENT
+        "experiment_code": None,
+        "experiment_result": None,
     }
 
 
