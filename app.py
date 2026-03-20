@@ -729,6 +729,11 @@ if st.session_state.final_report:
 if st.session_state.running:
     if _HAS_AUTOREFRESH:
         _st_autorefresh(interval=1500, key="running_refresh")
-    elif not st.session_state.log_queue.empty():
-        # 备用方案：只有 queue 有新数据时才 rerun，避免空转导致 RuntimeStoppedError
-        st.rerun()
+    else:
+        st.warning(
+            "⚠️ 未安装 streamlit-autorefresh，页面无法自动刷新。\n\n"
+            "请运行：`pip install streamlit-autorefresh`，然后重启 Streamlit。\n\n"
+            "或点击下方按钮手动刷新。",
+        )
+        if st.button("🔄 手动刷新", key="manual_refresh"):
+            st.rerun()
