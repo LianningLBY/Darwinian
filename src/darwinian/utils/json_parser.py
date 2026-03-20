@@ -28,14 +28,22 @@ def parse_llm_json(content: str) -> dict:
     text = re.sub(r"<think>[\s\S]*?</think>", "", text, flags=re.IGNORECASE).strip()
 
     # 处理未关闭的 <think> 块（无 </think> 结束标签，可能被截断）
-    # JSON 实际输出在思考内容之后，从后往前找第一个以 { 或 [ 开头的行
+    # JSON 实际输出在思考内容之后，从后往前找第一个「看起来像 JSON」的 { 行
+    # 判断标准：该行以 { 开头，且后续内容含有 "key": 模式（数学公式里的 { 不含此结构）
     if re.search(r"<think>", text, re.IGNORECASE):
         lines = text.splitlines()
+        found = False
         for i in range(len(lines) - 1, -1, -1):
             stripped_line = lines[i].strip()
             if stripped_line.startswith("{") or stripped_line.startswith("["):
-                text = "\n".join(lines[i:]).strip()
-                break
+                candidate = "\n".join(lines[i:]).strip()
+                # 必须包含至少一个 JSON 键值模式，排除数学公式中的花括号
+                if re.search(r'"[^"]{1,60}"\s*:', candidate):
+                    text = candidate
+                    found = True
+                    break
+        # 若整个响应都在 <think> 里（LLM 输出被截断），保持 text 不变
+        # 后续解析会失败并抛出清晰的 JSONDecodeError，由调用方处理
 
     # 尝试剥离 markdown 代码块
     # 匹配 ```json ... ``` 或 ``` ... ```

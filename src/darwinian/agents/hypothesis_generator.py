@@ -14,6 +14,7 @@ from darwinian.utils.json_parser import parse_llm_json
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
+import json as _json
 from darwinian.state import ResearchState, Hypothesis, AbstractionBranch
 from darwinian.utils.similarity import compute_cosine_similarity, get_text_embedding
 
@@ -77,10 +78,20 @@ def hypothesis_generator_node(state: ResearchState, llm: BaseChatModel) -> dict:
         HumanMessage(content=user_message),
     ])
 
-    raw = parse_llm_json(response.content)
+    try:
+        raw = parse_llm_json(response.content)
+        branches = [AbstractionBranch(**b) for b in raw["abstraction_tree"]]
+    except (_json.JSONDecodeError, KeyError, Exception):
+        # LLM 输出截断（如只有 <think> 块）或结构缺失，返回空 abstraction_tree
+        # Agent 3 会捕获空树 → MATH_ERROR → 触发重试，不让整个 pipeline 崩溃
+        return {
+            "current_hypothesis": Hypothesis(
+                core_problem=state.current_hypothesis.core_problem,
+                abstraction_tree=[],
+            ),
+            "messages": [response],
+        }
 
-    # 构建强类型 Hypothesis
-    branches = [AbstractionBranch(**b) for b in raw["abstraction_tree"]]
     new_hypothesis = Hypothesis(
         core_problem=raw["core_problem"],
         abstraction_tree=branches,
