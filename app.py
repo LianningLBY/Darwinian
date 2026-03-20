@@ -375,31 +375,31 @@ def render_metrics_table():
 # ──────────────────────────────────────────────
 # LLM 回调：把 LLM 调用进度实时写入 queue
 # ──────────────────────────────────────────────
-class _QueueCallback:
-    """极简 LangChain callback，把 LLM 调用事件推入 queue。"""
+def _make_queue_callback(q: queue.Queue):
+    """动态构建继承自 BaseCallbackHandler 的回调，避免在模块顶层 import langchain。"""
+    from langchain_core.callbacks import BaseCallbackHandler
 
-    def __init__(self, q: queue.Queue):
-        self._q = q
+    class _QueueCallback(BaseCallbackHandler):
+        def __init__(self):
+            super().__init__()
+            self._q = q
 
-    # LangChain callback 协议
-    def on_llm_start(self, serialized, prompts, **kwargs):
-        self._q.put(("log", ("info", "  ⌛ LLM 开始推理（等待模型响应）...")))
+        def on_llm_start(self, serialized, prompts, **kwargs):
+            self._q.put(("log", ("info", "  ⌛ LLM 开始推理（等待模型响应）...")))
 
-    def on_llm_end(self, response, **kwargs):
-        # 尝试提取 token 用量
-        try:
-            usage = response.llm_output.get("token_usage", {}) if response.llm_output else {}
-            total = usage.get("total_tokens") or usage.get("total_token_count")
-            suffix = f"  共 {total} tokens" if total else ""
-        except Exception:
-            suffix = ""
-        self._q.put(("log", ("ok", f"  ✓ LLM 响应完成，解析输出中...{suffix}")))
+        def on_llm_end(self, response, **kwargs):
+            try:
+                usage = response.llm_output.get("token_usage", {}) if response.llm_output else {}
+                total = usage.get("total_tokens") or usage.get("total_token_count")
+                suffix = f"  共 {total} tokens" if total else ""
+            except Exception:
+                suffix = ""
+            self._q.put(("log", ("ok", f"  ✓ LLM 响应完成，解析输出中...{suffix}")))
 
-    def on_llm_error(self, error, **kwargs):
-        self._q.put(("log", ("error", f"  ✗ LLM 出错: {str(error)[:120]}")))
+        def on_llm_error(self, error, **kwargs):
+            self._q.put(("log", ("error", f"  ✗ LLM 出错: {str(error)[:120]}")))
 
-    # LangChain 要求实现 raise_error 属性
-    raise_error: bool = False
+    return _QueueCallback()
 
 
 # ──────────────────────────────────────────────
@@ -434,7 +434,7 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
             ))
             return
 
-        cb = _QueueCallback(q)
+        cb = _make_queue_callback(q)
 
         if provider == "Anthropic":
             os.environ["ANTHROPIC_API_KEY"] = api_key
