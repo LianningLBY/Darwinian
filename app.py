@@ -293,18 +293,28 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
                model: str, provider: str, max_loops: int, q: queue.Queue):
     """在独立线程中运行 LangGraph，通过 queue 向主线程传递状态更新。"""
     try:
+        # 检查所有必要依赖
+        required = [
+            ("pydantic",          "pydantic"),
+            ("pydantic-core",     "pydantic_core"),
+            ("langchain",         "langchain"),
+            ("langchain-openai",  "langchain_openai"),
+            ("langchain-anthropic","langchain_anthropic"),
+            ("langgraph",         "langgraph"),
+        ]
         missing = []
-        for pkg, imp in [("pydantic", "pydantic"), ("pydantic-core", "pydantic_core")]:
+        for pkg, imp in required:
             try:
                 __import__(imp)
             except ModuleNotFoundError:
                 missing.append(pkg)
         if missing:
             q.put(("error",
-                f"缺少依赖包：{', '.join(missing)}\n"
-                f"请在终端运行：\n"
-                f"  pip install {' '.join(missing)}\n"
-                "安装后重启 Streamlit 即可。"
+                f"缺少依赖包：{', '.join(missing)}\n\n"
+                "请在终端运行：\n"
+                "  pip install -r requirements.txt\n\n"
+                f"或单独安装：\n"
+                f"  pip install {' '.join(missing)}"
             ))
             return
 
