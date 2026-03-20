@@ -54,9 +54,57 @@ def parse_llm_json(content: str) -> dict:
     fixed = re.sub(r'\\(?!["\\/bfnrtu])', r'\\\\', text)
     try:
         return json.loads(fixed)
+    except json.JSONDecodeError:
+        pass
+
+    # 修复 JSON 字符串值中的字面量控制字符（换行/回车/制表符）
+    # 原因：LLM 生成代码时常把多行代码直接写入 JSON 字符串，而非用 \n 转义
+    fixed2 = _escape_control_chars_in_strings(fixed)
+    try:
+        return json.loads(fixed2)
     except json.JSONDecodeError as e:
         raise json.JSONDecodeError(
             f"LLM 输出无法解析为 JSON。原始内容（前 500 字符）：\n{content[:500]}",
             e.doc,
             e.pos,
         ) from e
+
+
+def _escape_control_chars_in_strings(text: str) -> str:
+    """
+    逐字符扫描 JSON，将字符串值内部的字面量控制字符（\\n \\r \\t）转义。
+    不改变字符串之外的任何字符，保证 JSON 结构完整。
+    """
+    result: list[str] = []
+    in_string = False
+    escape_next = False
+
+    for ch in text:
+        if escape_next:
+            result.append(ch)
+            escape_next = False
+            continue
+
+        if ch == "\\" and in_string:
+            result.append(ch)
+            escape_next = True
+            continue
+
+        if ch == '"':
+            in_string = not in_string
+            result.append(ch)
+            continue
+
+        if in_string:
+            if ch == "\n":
+                result.append("\\n")
+            elif ch == "\r":
+                result.append("\\r")
+            elif ch == "\t":
+                result.append("\\t")
+            else:
+                result.append(ch)
+        else:
+            result.append(ch)
+
+    return "".join(result)
