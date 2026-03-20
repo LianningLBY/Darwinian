@@ -24,6 +24,9 @@ def parse_llm_json(content: str) -> dict:
     """
     text = content.strip()
 
+    # 剥离推理模型的 <think>...</think> 块（MiniMax / DeepSeek-R1 等）
+    text = re.sub(r"<think>[\s\S]*?</think>", "", text).strip()
+
     # 尝试剥离 markdown 代码块
     # 匹配 ```json ... ``` 或 ``` ... ```
     code_block = re.search(r"```(?:json)?\s*([\s\S]*?)```", text)
