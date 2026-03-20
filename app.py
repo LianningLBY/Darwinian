@@ -123,6 +123,51 @@ st.markdown("""
     border-radius: 12px; font-size: 0.78rem; font-weight: 600;
     background: #1f2937; color: #60a5fa; border: 1px solid #374151;
 }
+
+/* 流水线步骤可视化 */
+.pipeline {
+    display: flex; align-items: center; flex-wrap: nowrap;
+    overflow-x: auto; gap: 0; padding: 12px 4px 16px;
+    margin-bottom: 16px;
+}
+.pipeline-step {
+    display: flex; flex-direction: column; align-items: center;
+    min-width: 64px; max-width: 72px; text-align: center;
+    position: relative;
+}
+.pipeline-node {
+    width: 40px; height: 40px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem; border: 2px solid #30363d;
+    background: #161b22; transition: all 0.2s;
+    position: relative; z-index: 1;
+}
+.pipeline-node.pending  { opacity: 0.35; border-color: #30363d; }
+.pipeline-node.running  {
+    border-color: #388bfd; background: #0d1f3c;
+    box-shadow: 0 0 0 4px rgba(56,139,253,0.2);
+    animation: pulse 1.2s infinite;
+}
+.pipeline-node.done     { border-color: #3fb950; background: #0a1f10; }
+.pipeline-node.error    { border-color: #f85149; background: #1f0a0a; }
+@keyframes pulse {
+    0%   { box-shadow: 0 0 0 0   rgba(56,139,253,0.4); }
+    70%  { box-shadow: 0 0 0 8px rgba(56,139,253,0);   }
+    100% { box-shadow: 0 0 0 0   rgba(56,139,253,0);   }
+}
+.pipeline-label {
+    font-size: 0.62rem; color: #8b949e; margin-top: 5px;
+    line-height: 1.2; white-space: nowrap; overflow: hidden;
+    text-overflow: ellipsis; max-width: 68px;
+}
+.pipeline-label.running { color: #388bfd; font-weight: 600; }
+.pipeline-label.done    { color: #3fb950; }
+.pipeline-arrow {
+    flex-shrink: 0; width: 18px; height: 2px;
+    background: #30363d; margin-bottom: 20px; align-self: center;
+}
+.pipeline-arrow.done    { background: #3fb950; }
+.pipeline-arrow.running { background: #388bfd; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -259,6 +304,25 @@ def render_log_console():
         + "<br>".join(lines)
         + "</div>"
     )
+    st.markdown(html, unsafe_allow_html=True)
+
+
+def render_pipeline():
+    """渲染横向流水线进度条，显示 7 个 Agent 的执行状态。"""
+    statuses = st.session_state.agent_status
+    html = '<div class="pipeline">'
+    for i, (agent_id, icon, name, _) in enumerate(AGENTS):
+        status = statuses.get(agent_id, "pending")
+        short = name.split("·")[-1].strip() if "·" in name else name
+        html += f'<div class="pipeline-step">'
+        html += f'  <div class="pipeline-node {status}">{icon}</div>'
+        html += f'  <div class="pipeline-label {status}">{short}</div>'
+        html += f'</div>'
+        if i < len(AGENTS) - 1:
+            # 箭头颜色跟随左侧节点的状态
+            arrow_cls = "done" if status == "done" else ("running" if status == "running" else "")
+            html += f'<div class="pipeline-arrow {arrow_cls}"></div>'
+    html += '</div>'
     st.markdown(html, unsafe_allow_html=True)
 
 
@@ -674,6 +738,7 @@ col_left, col_right = st.columns([1, 1], gap="large")
 
 with col_left:
     st.markdown("### 🔄 研究流程")
+    render_pipeline()
     for agent_id, icon, name, desc in AGENTS:
         render_agent_card(agent_id, icon, name, desc)
 
