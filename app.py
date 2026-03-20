@@ -450,6 +450,18 @@ AGENTS = [
     ("publish_evaluator",   "🏆", "Agent 7 · 成果验收员",    "终局裁判，更新 publish_matrix，生成研究报告"),
 ]
 
+# 每个 Agent 的 LLM 具体任务说明（显示在 OUTPUT TRACE 中）
+AGENT_TASKS: dict[str, str] = {
+    "bottleneck_miner":     "📚 文献检索 · 提取 Limitations · 识别核心矛盾",
+    "hypothesis_generator": "💡 跨域假设生成 · 构建解决方案树",
+    "theoretical_critic":   "⚖️ 数学可行性审查 · 新颖性验证",
+    "code_architect":       "🏗️ 实验代码生成 · Baseline vs Proposed",
+    "diagnostician":        "🩺 错误诊断 · 区分代码缺陷 / 逻辑缺陷",
+    "poison_generator":     "☠️ 对抗性数据生成 · 鲁棒性测试",
+    "publish_evaluator":    "🏆 结果验收 · 发表可行性评估 · 生成报告",
+    "dataset_finder":       "🗄️ 数据集搜索 · 匹配最优数据集",
+}
+
 # ──────────────────────────────────────────────
 # Session State 初始化
 # ──────────────────────────────────────────────
@@ -475,7 +487,8 @@ def _init_state():
         "agent_detail":     {a[0]: {} for a in AGENTS},
         "current_stream":   "",   # 当前 LLM 流式输出缓冲
         "stream_history":   [],   # 已完成的 LLM 输出历史 [{"agent", "think", "response"}]
-        "_stream_agent":    "",   # 当前正在流式输出的 agent 名称
+        "_stream_agent":      "",   # 当前正在流式输出的 agent 名称
+        "_stream_agent_task": "",   # 当前 LLM 具体任务说明
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -1113,6 +1126,7 @@ with st.sidebar:
             "current_stream": "",
             "stream_history": [],
             "_stream_agent": "",
+            "_stream_agent_task": "",
         }.items():
             st.session_state[k] = v
 
@@ -1204,14 +1218,22 @@ if st.session_state.running:
                         summary = last.error_summary if hasattr(last, "error_summary") else str(last)
                         _add_log("warn", f"  写入账本: {summary[:80]}")
         elif msg_type == "stream_start":
-            # 记录当前正在运行的 agent 名称
+            # 记录当前正在运行的 agent 名称及任务说明
+            running_aid  = next(
+                (aid for aid, _, _, _ in AGENTS
+                 if st.session_state.agent_status.get(aid) == "running"),
+                "",
+            )
             running_name = next(
                 (name for aid, _, name, _ in AGENTS
                  if st.session_state.agent_status.get(aid) == "running"),
                 "LLM",
             )
-            st.session_state._stream_agent = running_name
-            st.session_state.current_stream = ""
+            task_desc = AGENT_TASKS.get(running_aid, "LLM 推理中")
+            st.session_state._stream_agent      = running_name
+            st.session_state._stream_agent_task = task_desc
+            st.session_state.current_stream     = ""
+            _add_log("info", f"  → {task_desc}")
         elif msg_type == "stream_chunk":
             st.session_state.current_stream += payload
         elif msg_type == "stream_end":
@@ -1228,6 +1250,7 @@ if st.session_state.running:
                     resp_part  = content.strip()
                 st.session_state.stream_history.append({
                     "agent":    st.session_state.get("_stream_agent", "LLM"),
+                    "task":     st.session_state.get("_stream_agent_task", ""),
                     "think":    think_part,
                     "response": resp_part,
                 })
@@ -1291,7 +1314,8 @@ if stream_text or stream_history:
 
     # 已完成的历史条目（全部折叠）
     for i, entry in enumerate(stream_history):
-        label = f"#{i+1}  {entry['agent']}"
+        task_suffix = f"  —  {entry['task']}" if entry.get("task") else ""
+        label = f"#{i+1}  {entry['agent']}{task_suffix}"
         with st.expander(label, expanded=False):
             if entry["think"]:
                 st.markdown(
@@ -1308,7 +1332,11 @@ if stream_text or stream_history:
 
     # 正在进行的实时流（展开）
     if stream_text:
-        with st.expander(f"⟳  {st.session_state.get('_stream_agent','LLM')}  — 输出中...", expanded=True):
+        _live_task = st.session_state.get("_stream_agent_task", "")
+        _live_label = (f"⟳  {st.session_state.get('_stream_agent','LLM')}  —  {_live_task}  — 输出中..."
+                       if _live_task else
+                       f"⟳  {st.session_state.get('_stream_agent','LLM')}  — 输出中...")
+        with st.expander(_live_label, expanded=True):
             _stream_block(stream_text)
 
 _section("RUNTIME LOG")
