@@ -40,109 +40,231 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 st.markdown("""
 <style>
-/* 全局字体和背景 */
-.main { background: #0e1117; }
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 
-/* 顶栏标题 */
+/* ── 全局 ── */
+html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
+.main .block-container { padding-top: 1rem; max-width: 1400px; }
+section[data-testid="stSidebar"] { background: #0a0d14 !important; border-right: 1px solid #1e2330; }
+
+/* ── 顶栏 ── */
 .app-header {
-    display: flex; align-items: center; gap: 12px;
-    padding: 16px 0 8px;
-    border-bottom: 1px solid #21262d;
-    margin-bottom: 24px;
+    position: relative;
+    padding: 20px 0 16px;
+    margin-bottom: 28px;
 }
-.app-header h1 { margin: 0; font-size: 1.8rem; font-weight: 700; }
-.app-header .subtitle { color: #8b949e; font-size: 0.9rem; margin-top: 2px; }
+.app-header::before {
+    content: '';
+    position: absolute; top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, #6366f1, #8b5cf6, #06b6d4, transparent);
+    border-radius: 1px;
+}
+.app-header-inner { display: flex; align-items: center; gap: 16px; }
+.app-header-logo {
+    width: 48px; height: 48px; border-radius: 12px;
+    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.6rem; box-shadow: 0 0 20px rgba(99,102,241,0.4);
+    flex-shrink: 0;
+}
+.app-header h1 {
+    margin: 0; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.5px;
+    background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+}
+.app-header .subtitle {
+    color: #475569; font-size: 0.82rem; margin-top: 3px; letter-spacing: 0.3px;
+}
+.app-header .badge-row { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
+.hbadge {
+    font-size: 0.68rem; padding: 2px 8px; border-radius: 20px; font-weight: 500;
+    border: 1px solid #1e2330; color: #64748b; background: #0f1420;
+}
 
-/* Agent 流程卡片 */
+/* ── Section 标题 ── */
+.section-title {
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 1.2px;
+    text-transform: uppercase; color: #475569;
+    margin: 20px 0 12px; display: flex; align-items: center; gap: 8px;
+}
+.section-title::after {
+    content: ''; flex: 1; height: 1px; background: #1e2330;
+}
+
+/* ── Agent 卡片 ── */
 .agent-card {
-    display: flex; align-items: flex-start; gap: 12px;
-    padding: 12px 16px;
-    border-radius: 8px;
-    margin-bottom: 8px;
-    border: 1px solid #21262d;
-    background: #161b22;
-    transition: border-color 0.2s;
+    display: flex; align-items: flex-start; gap: 14px;
+    padding: 14px 16px;
+    border-radius: 10px;
+    margin-bottom: 6px;
+    border: 1px solid #1e2330;
+    background: #0d1017;
+    transition: all 0.25s ease;
+    position: relative; overflow: hidden;
 }
-.agent-card.running  { border-color: #388bfd; background: #0d1117; }
-.agent-card.done     { border-color: #3fb950; }
-.agent-card.error    { border-color: #f85149; }
-.agent-card.pending  { opacity: 0.45; }
+.agent-card::before {
+    content: ''; position: absolute; left: 0; top: 0; bottom: 0;
+    width: 3px; background: transparent;
+    transition: background 0.25s;
+}
+.agent-card.running::before  { background: linear-gradient(180deg, #6366f1, #8b5cf6); }
+.agent-card.done::before     { background: linear-gradient(180deg, #10b981, #059669); }
+.agent-card.error::before    { background: #ef4444; }
 
-.agent-icon { font-size: 1.4rem; line-height: 1; margin-top: 2px; }
-.agent-name { font-weight: 600; font-size: 0.95rem; color: #e6edf3; }
-.agent-desc { font-size: 0.82rem; color: #8b949e; margin-top: 2px; }
-.agent-output {
-    font-size: 0.8rem; color: #c9d1d9;
-    background: #0d1117; border-radius: 4px;
-    padding: 6px 10px; margin-top: 8px;
-    border-left: 3px solid #388bfd;
-    white-space: pre-wrap; word-break: break-all;
+.agent-card.running {
+    border-color: rgba(99,102,241,0.35);
+    background: linear-gradient(135deg, #0d1017 0%, #0f1128 100%);
+    box-shadow: 0 0 0 1px rgba(99,102,241,0.1), 0 4px 24px rgba(99,102,241,0.06);
 }
+.agent-card.running .agent-name { color: #a5b4fc; }
+.agent-card.done   { border-color: rgba(16,185,129,0.25); }
+.agent-card.done .agent-name   { color: #6ee7b7; }
+.agent-card.error  { border-color: rgba(239,68,68,0.3); }
+.agent-card.pending { opacity: 0.38; }
 
-/* 发表指标矩阵 */
-.publish-matrix {
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: 12px; margin-top: 8px;
+.agent-icon {
+    font-size: 1.25rem; line-height: 1;
+    width: 36px; height: 36px; border-radius: 8px;
+    background: #131820; display: flex; align-items: center;
+    justify-content: center; flex-shrink: 0; margin-top: 1px;
+    border: 1px solid #1e2330;
 }
-.matrix-item {
-    padding: 14px 16px; border-radius: 8px;
-    border: 1px solid #21262d; text-align: center;
-}
-.matrix-item.green  { border-color: #3fb950; background: #0a1f10; }
-.matrix-item.red    { border-color: #f85149; background: #1f0a0a; }
-.matrix-item.grey   { border-color: #30363d; background: #161b22; }
-.matrix-label { font-size: 0.82rem; color: #8b949e; margin-bottom: 4px; }
-.matrix-value { font-size: 1.5rem; }
+.agent-card.running .agent-icon { background: #131828; border-color: rgba(99,102,241,0.3); }
+.agent-card.done    .agent-icon { background: #0b1a14; border-color: rgba(16,185,129,0.2); }
 
-/* failed_ledger 条目 */
-.ledger-item {
-    padding: 8px 12px; border-radius: 6px;
-    border-left: 3px solid #f85149;
-    background: #161b22; margin-bottom: 6px;
-    font-size: 0.82rem; color: #c9d1d9;
-}
-.ledger-type { font-weight: 600; color: #f85149; margin-right: 6px; }
+.agent-name { font-weight: 600; font-size: 0.88rem; color: #cbd5e1; letter-spacing: 0.1px; }
+.agent-desc { font-size: 0.76rem; color: #334155; margin-top: 3px; }
+.agent-status-row { display: flex; align-items: center; gap: 8px; }
 
-/* 指标对比表 */
-.metrics-table {
-    width: 100%; border-collapse: collapse; font-size: 0.85rem;
+/* running 脉冲点 */
+.pulse-dot {
+    width: 7px; height: 7px; border-radius: 50%;
+    background: #6366f1;
+    animation: pulsedot 1.4s ease-in-out infinite;
+    flex-shrink: 0;
 }
-.metrics-table th {
-    text-align: left; padding: 8px 12px;
-    border-bottom: 1px solid #21262d; color: #8b949e;
-}
-.metrics-table td {
-    padding: 8px 12px; border-bottom: 1px solid #161b22; color: #e6edf3;
-}
-.metrics-table .better { color: #3fb950; font-weight: 600; }
-.metrics-table .worse  { color: #f85149; }
-
-/* 循环进度徽章 */
-.loop-badge {
-    display: inline-block; padding: 2px 10px;
-    border-radius: 12px; font-size: 0.78rem; font-weight: 600;
-    background: #1f2937; color: #60a5fa; border: 1px solid #374151;
+@keyframes pulsedot {
+    0%,100% { opacity: 1; transform: scale(1); }
+    50%      { opacity: 0.4; transform: scale(0.7); }
 }
 
-/* Agent 详情块 */
+/* ── Agent 详情 ── */
 .agent-detail {
     margin-top: 10px; padding: 10px 12px;
-    background: #0d1117; border-radius: 6px;
-    border: 1px solid #21262d; font-size: 0.8rem;
+    background: rgba(6,9,15,0.8); border-radius: 7px;
+    border: 1px solid #1a2035; font-size: 0.79rem;
 }
-.ad-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
-.ad-label { color: #8b949e; white-space: nowrap; min-width: 60px; }
-.ad-value { color: #e6edf3; }
-.ad-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
-.ad-pass  { background: #0a1f10; color: #3fb950; border: 1px solid #3fb950; }
-.ad-fail  { background: #1f0a0a; color: #f85149; border: 1px solid #f85149; }
-.ad-warn  { background: #1f1a0a; color: #d29922; border: 1px solid #d29922; }
-.ad-feedback { color: #c9d1d9; margin-top: 4px; line-height: 1.5; }
-.ad-ev { color: #8b949e; margin-bottom: 3px; }
-.ad-hyp { margin-bottom: 6px; }
-.ad-hyp-name { font-weight: 600; color: #79c0ff; margin-right: 6px; }
-.ad-hyp-desc { color: #c9d1d9; }
+.ad-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
+.ad-label {
+    color: #334155; white-space: nowrap; min-width: 56px;
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.6px;
+    padding-top: 2px;
+}
+.ad-value { color: #94a3b8; line-height: 1.5; }
+.ad-badge {
+    padding: 2px 9px; border-radius: 5px;
+    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.3px;
+}
+.ad-pass { background: rgba(16,185,129,0.12); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
+.ad-fail { background: rgba(239,68,68,0.1);   color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
+.ad-warn { background: rgba(251,191,36,0.1);  color: #fbbf24; border: 1px solid rgba(251,191,36,0.25); }
+.ad-feedback { color: #64748b; margin-top: 5px; line-height: 1.6; font-size: 0.78rem; }
+.ad-ev {
+    color: #334155; margin-bottom: 3px; padding-left: 10px;
+    border-left: 2px solid #1e2330;
+}
+.ad-hyp {
+    margin-bottom: 7px; padding: 7px 10px;
+    background: #0a0d14; border-radius: 5px; border: 1px solid #1a2035;
+}
+.ad-hyp-name { font-weight: 600; color: #818cf8; display: block; margin-bottom: 2px; }
+.ad-hyp-desc { color: #475569; font-size: 0.76rem; line-height: 1.5; }
 
+/* ── 发表矩阵 ── */
+.publish-matrix {
+    display: grid; grid-template-columns: 1fr 1fr;
+    gap: 10px; margin-top: 4px;
+}
+.matrix-item {
+    padding: 16px 14px; border-radius: 10px;
+    border: 1px solid #1e2330; text-align: center;
+    background: #0a0d14; position: relative; overflow: hidden;
+    transition: all 0.3s;
+}
+.matrix-item.green {
+    border-color: rgba(16,185,129,0.3);
+    background: linear-gradient(135deg, #061410 0%, #091a13 100%);
+    box-shadow: 0 0 20px rgba(16,185,129,0.05);
+}
+.matrix-item.grey { opacity: 0.5; }
+.matrix-label {
+    font-size: 0.72rem; font-weight: 500; letter-spacing: 0.6px;
+    text-transform: uppercase; color: #475569; margin-bottom: 8px;
+}
+.matrix-icon { font-size: 1.6rem; display: block; margin-bottom: 4px; }
+.matrix-status {
+    font-size: 0.72rem; font-weight: 600;
+    color: #1e2330;
+}
+.matrix-item.green .matrix-status { color: #34d399; }
+
+/* ── 日志控制台 ── */
+.log-console {
+    background: #060810; border: 1px solid #1a2035;
+    border-radius: 10px; overflow: hidden;
+}
+.log-console-header {
+    padding: 8px 14px; background: #0a0d16;
+    border-bottom: 1px solid #1a2035;
+    display: flex; align-items: center; gap: 8px;
+}
+.log-dot { width: 8px; height: 8px; border-radius: 50%; }
+.log-console-body {
+    padding: 10px 14px; height: 220px; overflow-y: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.75rem; line-height: 1.75;
+}
+
+/* ── 指标表 ── */
+.metrics-table {
+    width: 100%; border-collapse: collapse; font-size: 0.82rem;
+}
+.metrics-table thead tr {
+    background: #080b12;
+}
+.metrics-table th {
+    text-align: left; padding: 9px 14px;
+    border-bottom: 1px solid #1e2330;
+    color: #334155; font-weight: 500;
+    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.8px;
+}
+.metrics-table td { padding: 9px 14px; border-bottom: 1px solid #10151f; color: #64748b; }
+.metrics-table tbody tr:hover td { background: #080b12; }
+.metrics-table .better { color: #34d399; font-weight: 600; }
+.metrics-table .worse  { color: #f87171; }
+.metrics-table td:first-child { color: #94a3b8; font-weight: 500; }
+
+/* ── 认知账本 ── */
+.ledger-item {
+    padding: 10px 14px; border-radius: 8px;
+    border: 1px solid #1e2330; border-left: 3px solid #ef4444;
+    background: #080b12; margin-bottom: 6px;
+    font-size: 0.79rem; color: #64748b;
+}
+.ledger-type {
+    font-weight: 600; font-size: 0.68rem; letter-spacing: 0.6px;
+    text-transform: uppercase; color: #f87171; margin-right: 8px;
+    padding: 1px 6px; background: rgba(239,68,68,0.1);
+    border-radius: 4px;
+}
+
+/* ── 循环徽章 ── */
+.loop-badge {
+    display: inline-block; padding: 3px 12px;
+    border-radius: 20px; font-size: 0.75rem; font-weight: 600;
+    background: linear-gradient(135deg, #0f1428, #13192e);
+    color: #818cf8; border: 1px solid rgba(99,102,241,0.25);
+}
 
 </style>
 """, unsafe_allow_html=True)
@@ -199,10 +321,18 @@ _init_state()
 def render_header():
     st.markdown("""
     <div class="app-header">
-        <span style="font-size:2.2rem">🧬</span>
-        <div>
-            <h1>Darwinian</h1>
-            <div class="subtitle">状态驱动型多智能体自动化科研系统 · Powered by LangGraph</div>
+        <div class="app-header-inner">
+            <div class="app-header-logo">🧬</div>
+            <div>
+                <h1>Darwinian</h1>
+                <div class="subtitle">State-Driven Multi-Agent Automated Research System</div>
+                <div class="badge-row">
+                    <span class="hbadge">LangGraph</span>
+                    <span class="hbadge">7 Agents</span>
+                    <span class="hbadge">Adversarial Testing</span>
+                    <span class="hbadge">Auto-Publish Eval</span>
+                </div>
+            </div>
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -270,16 +400,23 @@ def _render_agent_detail(agent_id: str) -> str:
 
 def render_agent_card(agent_id: str, icon: str, name: str, desc: str):
     status = st.session_state.agent_status.get(agent_id, "pending")
-    status_icon = {"pending": "⬜", "running": "⏳", "done": "✅", "error": "❌"}.get(status, "⬜")
+    if status == "running":
+        status_html = '<span class="pulse-dot"></span>'
+    elif status == "done":
+        status_html = '<span style="color:#34d399;font-size:0.75rem">✓ 完成</span>'
+    elif status == "error":
+        status_html = '<span style="color:#f87171;font-size:0.75rem">✗ 出错</span>'
+    else:
+        status_html = ""
     detail_html = _render_agent_detail(agent_id) if status == "done" else ""
 
     st.markdown(f"""
     <div class="agent-card {status}">
         <div class="agent-icon">{icon}</div>
-        <div style="flex:1">
-            <div style="display:flex;align-items:center;gap:8px">
+        <div style="flex:1;min-width:0">
+            <div class="agent-status-row">
                 <span class="agent-name">{name}</span>
-                <span>{status_icon}</span>
+                {status_html}
             </div>
             <div class="agent-desc">{desc}</div>
             {detail_html}
@@ -291,16 +428,20 @@ def render_agent_card(agent_id: str, icon: str, name: str, desc: str):
 def render_publish_matrix():
     m = st.session_state.publish_matrix
     items = [
-        ("新颖性",   m["novelty"],   "💎"),
-        ("基准提升", m["baseline"],  "📈"),
-        ("鲁棒性",   m["robustness"],"🛡️"),
-        ("可解释性", m["explain"],   "📖"),
+        ("新颖性",   m["novelty"],   "💎", "Novelty"),
+        ("基准提升", m["baseline"],  "📈", "Baseline"),
+        ("鲁棒性",   m["robustness"],"🛡️", "Robustness"),
+        ("可解释性", m["explain"],   "📖", "Explainability"),
     ]
     html = '<div class="publish-matrix">'
-    for label, passed, icon in items:
+    for label, passed, icon, _ in items:
         css = "green" if passed else "grey"
-        val = "✅" if passed else "⬜"
-        html += f'<div class="matrix-item {css}"><div class="matrix-label">{label}</div><div class="matrix-value">{icon} {val}</div></div>'
+        status = '<span style="color:#34d399;font-size:0.7rem;font-weight:600">PASSED</span>' if passed else '<span style="color:#1e2330;font-size:0.7rem">PENDING</span>'
+        html += (f'<div class="matrix-item {css}">'
+                 f'<span class="matrix-icon">{icon}</span>'
+                 f'<div class="matrix-label">{label}</div>'
+                 f'<div class="matrix-status">{status}</div>'
+                 f'</div>')
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
 
@@ -322,23 +463,28 @@ def render_failed_ledger():
 
 def render_log_console():
     logs = st.session_state.logs
-    if not logs:
-        st.caption("等待运行...")
-        return
-    level_color = {"info": "#8b949e", "ok": "#3fb950", "warn": "#d29922", "error": "#f85149"}
+    level_color = {"info": "#475569", "ok": "#34d399", "warn": "#fbbf24", "error": "#f87171"}
+    level_prefix = {"info": "·", "ok": "✓", "warn": "!", "error": "✗"}
     lines = []
-    for ts, level, msg in logs[-60:]:   # 最多显示最近 60 条
-        color = level_color.get(level, "#8b949e")
+    for ts, level, msg in logs[-80:]:
+        color  = level_color.get(level, "#475569")
+        prefix = level_prefix.get(level, "·")
         lines.append(
-            f'<span style="color:#555e6b">{ts}</span> '
-            f'<span style="color:{color}">{msg}</span>'
+            f'<span style="color:#1e293b;user-select:none">{ts}</span> '
+            f'<span style="color:{color};margin-right:6px">{prefix}</span>'
+            f'<span style="color:{color if level != "info" else "#475569"}">{msg}</span>'
         )
+    body = "<br>".join(lines) if lines else '<span style="color:#1e293b">waiting for execution...</span>'
     html = (
-        '<div style="background:#0d1117;border:1px solid #21262d;border-radius:8px;'
-        'padding:12px 14px;height:220px;overflow-y:auto;font-family:monospace;'
-        'font-size:0.78rem;line-height:1.7">'
-        + "<br>".join(lines)
-        + "</div>"
+        '<div class="log-console">'
+        '<div class="log-console-header">'
+        '<div class="log-dot" style="background:#ef4444"></div>'
+        '<div class="log-dot" style="background:#f59e0b"></div>'
+        '<div class="log-dot" style="background:#10b981"></div>'
+        '<span style="font-size:0.68rem;color:#334155;margin-left:6px;font-family:monospace">runtime.log</span>'
+        '</div>'
+        f'<div class="log-console-body">{body}</div>'
+        '</div>'
     )
     st.markdown(html, unsafe_allow_html=True)
 
@@ -843,82 +989,67 @@ if st.session_state.running:
 # ── 布局：左 Agent 流程 | 右 结果面板 ──
 col_left, col_right = st.columns([1, 1], gap="large")
 
+def _section(title: str):
+    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+
+def _stream_block(stream_text: str):
+    import re as _re
+    think_match = _re.search(r"<think>([\s\S]*?)</think>([\s\S]*)", stream_text)
+    base_style = ("font-size:0.77rem;white-space:pre-wrap;font-family:'JetBrains Mono','Fira Code',monospace;"
+                  "max-height:280px;overflow-y:auto;line-height:1.7;padding:12px 14px;"
+                  "background:#06080f;border:1px solid #1a2035;border-radius:8px;")
+    if think_match:
+        think_part = think_match.group(1).strip()
+        rest_part  = think_match.group(2).strip()
+        with st.expander("🤔 Reasoning trace", expanded=False):
+            st.markdown(f'<div style="{base_style}color:#334155">{think_part}</div>',
+                        unsafe_allow_html=True)
+        if rest_part:
+            st.markdown(f'<div style="{base_style}color:#64748b">{rest_part}</div>',
+                        unsafe_allow_html=True)
+    else:
+        in_think = "<think>" in stream_text and "</think>" not in stream_text
+        color = "#334155" if in_think else "#64748b"
+        if in_think:
+            st.markdown('<span style="font-size:0.72rem;color:#475569">⟳ reasoning...</span>',
+                        unsafe_allow_html=True)
+        st.markdown(f'<div style="{base_style}color:{color}">{stream_text[-3000:]}</div>',
+                    unsafe_allow_html=True)
+
+
 with col_left:
-    st.markdown("### 🔄 研究流程")
+    _section("AGENT PIPELINE")
     for agent_id, icon, name, desc in AGENTS:
         render_agent_card(agent_id, icon, name, desc)
 
-    # 流式输出
     stream_text = st.session_state.get("current_stream", "")
     if stream_text:
-        st.markdown("### 💬 模型实时输出")
-        # 把 <think>...</think> 部分用灰色折叠展示，正文用白色
-        think_match = __import__("re").search(r"<think>([\s\S]*?)</think>([\s\S]*)", stream_text)
-        if think_match:
-            think_part = think_match.group(1).strip()
-            rest_part  = think_match.group(2).strip()
-            with st.expander("🤔 推理过程", expanded=False):
-                st.markdown(
-                    f'<div style="font-size:0.78rem;color:#8b949e;white-space:pre-wrap;'
-                    f'font-family:monospace;max-height:300px;overflow-y:auto">{think_part}</div>',
-                    unsafe_allow_html=True,
-                )
-            if rest_part:
-                st.markdown(
-                    f'<div style="font-size:0.82rem;color:#e6edf3;white-space:pre-wrap;'
-                    f'background:#0d1117;border:1px solid #21262d;border-radius:6px;'
-                    f'padding:12px;max-height:300px;overflow-y:auto;font-family:monospace">'
-                    f'{rest_part}</div>',
-                    unsafe_allow_html=True,
-                )
-        else:
-            # 还在推理中（think 块未闭合）或无 think 块
-            in_think = "<think>" in stream_text and "</think>" not in stream_text
-            color = "#8b949e" if in_think else "#e6edf3"
-            label = "🤔 推理中..." if in_think else ""
-            if label:
-                st.caption(label)
-            st.markdown(
-                f'<div style="font-size:0.82rem;color:{color};white-space:pre-wrap;'
-                f'background:#0d1117;border:1px solid #21262d;border-radius:6px;'
-                f'padding:12px;max-height:300px;overflow-y:auto;font-family:monospace">'
-                f'{stream_text[-3000:]}</div>',  # 只显示最后 3000 字符防止爆版
-                unsafe_allow_html=True,
-            )
+        _section("LIVE OUTPUT")
+        _stream_block(stream_text)
 
-    # 实时日志
-    st.markdown("### 🖥️ 运行日志")
+    _section("RUNTIME LOG")
     render_log_console()
 
-    # 错误显示
     if "_error" in st.session_state and st.session_state["_error"]:
-        with st.expander("❌ 运行错误详情", expanded=True):
+        with st.expander("✗ Error details", expanded=True):
             st.code(st.session_state["_error"], language="python")
 
 with col_right:
-    # 发表指标矩阵
-    st.markdown("### 📊 发表指标矩阵")
+    _section("PUBLISH CHECKLIST")
     render_publish_matrix()
 
-    # 最终裁决
     if st.session_state.final_verdict:
         verdict = st.session_state.final_verdict
         if verdict == "publish_ready":
-            st.success("🎉 研究达到发表标准！报告已生成。", icon="✅")
+            st.success("Research meets publication standard.", icon="✅")
         else:
-            st.warning("⚠️ 鲁棒性测试未通过，已记入认知账本，准备下一轮。", icon="🔄")
+            st.warning("Robustness test failed — logged to cognitive ledger.", icon="🔄")
 
-    st.divider()
-
-    # 实验指标对比
-    st.markdown("### 📈 实验指标对比")
+    _section("EXPERIMENT METRICS")
     render_metrics_table()
 
-    st.divider()
-
-    # 认知账本
     ledger_count = len(st.session_state.failed_ledger)
-    st.markdown(f"### 📋 认知账本 ({ledger_count} 条记录)")
+    _section(f"COGNITIVE LEDGER  ·  {ledger_count} records")
     render_failed_ledger()
 
 # ── 研究报告（全宽展示）──
