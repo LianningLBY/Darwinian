@@ -88,7 +88,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     font-size: 0.65rem;
     letter-spacing: 2px;
     text-transform: uppercase;
-    color: #3d4a5c;
+    color: #5a6a80;
     font-weight: 400;
 }
 .live-badge {
@@ -115,8 +115,8 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     font-weight: 500;
     letter-spacing: 1.5px;
     text-transform: uppercase;
-    color: #3d4a5c;
-    border: 1px solid #131929;
+    color: #5a6a7e;
+    border: 1px solid #1e2a38;
     border-radius: 3px;
     padding: 3px 9px;
 }
@@ -127,7 +127,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     font-weight: 600;
     letter-spacing: 2px;
     text-transform: uppercase;
-    color: #3d4a5c;
+    color: #5a6a7e;
     margin: 22px 0 10px;
     display: flex;
     align-items: center;
@@ -183,7 +183,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     align-items: center;
     gap: 4px;
 }
-.pill-queued  { color: #3d4a5c; background: transparent; border: 1px solid #131929; }
+.pill-queued  { color: #5a6a7e; background: transparent; border: 1px solid #1e2a38; }
 .pill-running { color: #818cf8; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); }
 .pill-done    { color: #10b981; background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.2); }
 .pill-error   { color: #ef4444; background: rgba(239,68,68,0.07);  border: 1px solid rgba(239,68,68,0.2); }
@@ -201,7 +201,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 .agent-card.done    .agent-headline { color: #6ee7b7; }
 .agent-excerpt {
     font-size: 0.73rem;
-    color: #3d4a5c;
+    color: #6b7a8d;
     line-height: 1.45;
 }
 
@@ -228,7 +228,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 }
 .ad-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
 .ad-label {
-    color: #3d4a5c;
+    color: #5a6a7e;
     white-space: nowrap;
     min-width: 60px;
     font-size: 0.65rem;
@@ -237,7 +237,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     padding-top: 2px;
     font-weight: 500;
 }
-.ad-value { color: #6b7a8d; line-height: 1.5; }
+.ad-value { color: #8a9ab0; line-height: 1.5; }
 .ad-badge {
     padding: 2px 8px;
     border-radius: 3px;
@@ -248,9 +248,9 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 .ad-pass { background: rgba(16,185,129,0.10); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
 .ad-fail { background: rgba(239,68,68,0.08);  color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
 .ad-warn { background: rgba(217,119,6,0.08);  color: #d97706; border: 1px solid rgba(217,119,6,0.2); }
-.ad-feedback { color: #3d4a5c; margin-top: 5px; line-height: 1.6; font-size: 0.75rem; }
+.ad-feedback { color: #6b7a8d; margin-top: 5px; line-height: 1.6; font-size: 0.75rem; }
 .ad-ev {
-    color: #3d4a5c;
+    color: #6b7a8d;
     margin-bottom: 3px;
     padding-left: 10px;
     border-left: 2px solid #131929;
@@ -264,7 +264,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     border: 1px solid #131929;
 }
 .ad-hyp-name { font-weight: 600; color: #6366f1; display: block; margin-bottom: 2px; font-size: 0.75rem; }
-.ad-hyp-desc { color: #3d4a5c; font-size: 0.72rem; line-height: 1.5; }
+.ad-hyp-desc { color: #6b7a8d; font-size: 0.72rem; line-height: 1.5; }
 
 /* ── Publish matrix ── */
 .publish-matrix {
@@ -298,12 +298,12 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     font-weight: 600;
     letter-spacing: 0.8px;
     text-transform: uppercase;
-    color: #3d4a5c;
+    color: #5a6a7e;
     margin-bottom: 5px;
     display: block;
 }
 .matrix-pass   { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.8px; color: #10b981; text-transform: uppercase; }
-.matrix-pending { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.8px; color: #1e2a38; text-transform: uppercase; }
+.matrix-pending { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.8px; color: #3d4f63; text-transform: uppercase; }
 
 /* ── Log console ── */
 .log-console {
@@ -323,7 +323,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 .log-dot { width: 7px; height: 7px; border-radius: 50%; }
 .log-console-filename {
     font-size: 0.62rem;
-    color: #3d4a5c;
+    color: #5a6a7e;
     margin-left: 8px;
     font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
     letter-spacing: 0.5px;
@@ -349,7 +349,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     text-align: left;
     padding: 8px 12px;
     border-bottom: 1px solid #131929;
-    color: #3d4a5c;
+    color: #5a6a7e;
     font-weight: 500;
     font-size: 0.62rem;
     text-transform: uppercase;
@@ -358,13 +358,13 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 .metrics-table td {
     padding: 8px 12px;
     border-bottom: 1px solid #0e1118;
-    color: #3d4a5c;
+    color: #6b7a8d;
 }
 .metrics-table tbody tr:nth-child(even) td { background: #09090e; }
 .metrics-table tbody tr:hover td { background: #0c0e16; }
 .metrics-table .better { color: #10b981; font-weight: 600; }
 .metrics-table .worse  { color: #ef4444; }
-.metrics-table td:first-child { color: #6b7a8d; font-weight: 500; }
+.metrics-table td:first-child { color: #8a9ab0; font-weight: 500; }
 
 /* ── Failed ledger ── */
 .ledger-item {
@@ -375,7 +375,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     background: #0b0e15;
     margin-bottom: 5px;
     font-size: 0.76rem;
-    color: #3d4a5c;
+    color: #6b7a8d;
     line-height: 1.5;
 }
 .ledger-type {
@@ -595,7 +595,7 @@ def render_failed_ledger():
     ledger = st.session_state.failed_ledger
     if not ledger:
         st.markdown(
-            '<span style="font-size:0.72rem;color:#3d4a5c;letter-spacing:0.5px;">No failures recorded.</span>',
+            '<span style="font-size:0.72rem;color:#5a6a7e;letter-spacing:0.5px;">No failures recorded.</span>',
             unsafe_allow_html=True,
         )
         return
@@ -606,8 +606,8 @@ def render_failed_ledger():
         st.markdown(
             f'<div class="ledger-item">'
             f'<span class="ledger-type">{ftype}</span>'
-            f'<span style="color:#3d4a5c;font-size:0.68rem;margin-right:8px;">iter&nbsp;{itr}</span>'
-            f'<span style="color:#4a5568;">{summary}</span>'
+            f'<span style="color:#5a6a7e;font-size:0.68rem;margin-right:8px;">iter&nbsp;{itr}</span>'
+            f'<span style="color:#7a8a9e;">{summary}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -617,7 +617,7 @@ def render_log_console():
     import html as _html_mod
     logs = st.session_state.logs
     level_color = {
-        "info":  "#3d4a5c",
+        "info":  "#6b7a8d",
         "ok":    "#10b981",
         "warn":  "#d97706",
         "error": "#ef4444",
@@ -629,11 +629,11 @@ def render_log_console():
         prefix = level_prefix.get(level, "·")
         safe_msg = _html_mod.escape(str(msg))
         lines.append(
-            f'<span style="color:#1e2a38;user-select:none">{ts}</span>'
+            f'<span style="color:#3d4f63;user-select:none">{ts}</span>'
             f'&nbsp;<span style="color:{color}">{prefix}</span>'
             f'&nbsp;<span style="color:{color}">{safe_msg}</span>'
         )
-    body = "<br>".join(lines) if lines else '<span style="color:#1e2a38">waiting for execution...</span>'
+    body = "<br>".join(lines) if lines else '<span style="color:#3d4f63">waiting for execution...</span>'
     html = (
         '<div class="log-console">'
         '<div class="log-console-header">'
@@ -655,7 +655,7 @@ def render_metrics_table():
     pois = st.session_state.poison_metrics
     if not base and not prop:
         st.markdown(
-            '<span style="font-size:0.72rem;color:#3d4a5c;">Awaiting experiment results...</span>',
+            '<span style="font-size:0.72rem;color:#5a6a7e;">Awaiting experiment results...</span>',
             unsafe_allow_html=True,
         )
         return
@@ -1157,9 +1157,7 @@ if st.session_state.running:
             st.session_state["_error"] = payload
             _add_log("error", f"运行出错: {payload.splitlines()[-1] if payload else '未知错误'}")
 
-# ── 布局：左 Agent 流程 | 右 结果面板 ──
-col_left, col_right = st.columns([1, 1], gap="large")
-
+# ── 布局：单列纵向 ──
 def _section(title: str):
     import html as _html_mod
     safe_title = _html_mod.escape(str(title)).upper()
@@ -1175,55 +1173,53 @@ def _stream_block(stream_text: str):
         think_part = think_match.group(1).strip()
         rest_part  = think_match.group(2).strip()
         with st.expander("🤔 Reasoning trace", expanded=False):
-            st.markdown(f'<div style="{base_style}color:#334155">{think_part}</div>',
+            st.markdown(f'<div style="{base_style}color:#475569">{think_part}</div>',
                         unsafe_allow_html=True)
         if rest_part:
-            st.markdown(f'<div style="{base_style}color:#64748b">{rest_part}</div>',
+            st.markdown(f'<div style="{base_style}color:#8a9ab0">{rest_part}</div>',
                         unsafe_allow_html=True)
     else:
         in_think = "<think>" in stream_text and "</think>" not in stream_text
-        color = "#334155" if in_think else "#64748b"
+        color = "#475569" if in_think else "#8a9ab0"
         if in_think:
-            st.markdown('<span style="font-size:0.72rem;color:#475569">⟳ reasoning...</span>',
+            st.markdown('<span style="font-size:0.72rem;color:#5a6a7e">⟳ reasoning...</span>',
                         unsafe_allow_html=True)
         st.markdown(f'<div style="{base_style}color:{color}">{stream_text[-3000:]}</div>',
                     unsafe_allow_html=True)
 
 
-with col_left:
-    _section("AGENT PIPELINE")
-    for agent_id, icon, name, desc in AGENTS:
-        render_agent_card(agent_id, icon, name, desc)
+_section("AGENT PIPELINE")
+for agent_id, icon, name, desc in AGENTS:
+    render_agent_card(agent_id, icon, name, desc)
 
-    stream_text = st.session_state.get("current_stream", "")
-    if stream_text:
-        _section("LIVE OUTPUT")
-        _stream_block(stream_text)
+stream_text = st.session_state.get("current_stream", "")
+if stream_text:
+    _section("LIVE OUTPUT")
+    _stream_block(stream_text)
 
-    _section("RUNTIME LOG")
-    render_log_console()
+_section("RUNTIME LOG")
+render_log_console()
 
-    if "_error" in st.session_state and st.session_state["_error"]:
-        with st.expander("✗ Error details", expanded=True):
-            st.code(st.session_state["_error"], language="python")
+if "_error" in st.session_state and st.session_state["_error"]:
+    with st.expander("✗ Error details", expanded=True):
+        st.code(st.session_state["_error"], language="python")
 
-with col_right:
-    _section("PUBLISH CHECKLIST")
-    render_publish_matrix()
+_section("PUBLISH CHECKLIST")
+render_publish_matrix()
 
-    if st.session_state.final_verdict:
-        verdict = st.session_state.final_verdict
-        if verdict == "publish_ready":
-            st.success("Research meets publication standard.", icon="✅")
-        else:
-            st.warning("Robustness test failed — logged to cognitive ledger.", icon="🔄")
+if st.session_state.final_verdict:
+    verdict = st.session_state.final_verdict
+    if verdict == "publish_ready":
+        st.success("Research meets publication standard.", icon="✅")
+    else:
+        st.warning("Robustness test failed — logged to cognitive ledger.", icon="🔄")
 
-    _section("EXPERIMENT METRICS")
-    render_metrics_table()
+_section("EXPERIMENT METRICS")
+render_metrics_table()
 
-    ledger_count = len(st.session_state.failed_ledger)
-    _section(f"COGNITIVE LEDGER  ·  {ledger_count} records")
-    render_failed_ledger()
+ledger_count = len(st.session_state.failed_ledger)
+_section(f"COGNITIVE LEDGER  ·  {ledger_count} records")
+render_failed_ledger()
 
 # ── 研究报告（全宽展示）──
 if st.session_state.final_report:
