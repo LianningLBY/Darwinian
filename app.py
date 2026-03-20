@@ -357,6 +357,36 @@ def render_metrics_table():
 
 
 # ──────────────────────────────────────────────
+# LLM 回调：把 LLM 调用进度实时写入 queue
+# ──────────────────────────────────────────────
+class _QueueCallback:
+    """极简 LangChain callback，把 LLM 调用事件推入 queue。"""
+
+    def __init__(self, q: queue.Queue):
+        self._q = q
+
+    # LangChain callback 协议
+    def on_llm_start(self, serialized, prompts, **kwargs):
+        self._q.put(("log", ("info", "  ⌛ LLM 开始推理（等待模型响应）...")))
+
+    def on_llm_end(self, response, **kwargs):
+        # 尝试提取 token 用量
+        try:
+            usage = response.llm_output.get("token_usage", {}) if response.llm_output else {}
+            total = usage.get("total_tokens") or usage.get("total_token_count")
+            suffix = f"  共 {total} tokens" if total else ""
+        except Exception:
+            suffix = ""
+        self._q.put(("log", ("ok", f"  ✓ LLM 响应完成，解析输出中...{suffix}")))
+
+    def on_llm_error(self, error, **kwargs):
+        self._q.put(("log", ("error", f"  ✗ LLM 出错: {str(error)[:120]}")))
+
+    # LangChain 要求实现 raise_error 属性
+    raise_error: bool = False
+
+
+# ──────────────────────────────────────────────
 # 运行逻辑（在后台线程中执行图）
 # ──────────────────────────────────────────────
 def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
@@ -388,15 +418,17 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
             ))
             return
 
+        cb = _QueueCallback(q)
+
         if provider == "Anthropic":
             os.environ["ANTHROPIC_API_KEY"] = api_key
             from langchain_anthropic import ChatAnthropic
-            llm = ChatAnthropic(model=model, max_tokens=8192)
+            llm = ChatAnthropic(model=model, max_tokens=8192, callbacks=[cb])
 
         elif provider == "OpenAI":
             os.environ["OPENAI_API_KEY"] = api_key
             from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(model=model, max_tokens=8192)
+            llm = ChatOpenAI(model=model, max_tokens=8192, callbacks=[cb])
 
         elif provider == "MiniMax":
             # MiniMax 提供 OpenAI 兼容接口
@@ -406,6 +438,7 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
                 api_key=api_key,
                 base_url="https://api.minimax.chat/v1",
                 max_tokens=8192,
+                callbacks=[cb],
             )
 
         else:
