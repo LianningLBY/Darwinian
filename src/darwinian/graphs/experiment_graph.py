@@ -57,7 +57,7 @@ def dataset_router_node(state: ResearchState) -> dict:
 
 
 def code_execute_node(state: ResearchState) -> dict:
-    """工具节点：在 Docker 沙箱中执行完整实验代码（非毒药模式）"""
+    """工具节点：执行完整实验代码（Docker 优先，不可用时降级 subprocess）"""
     if state.experiment_code is None:
         raise ValueError("code_execute_node 调用前必须先运行 code_architect_node")
 
@@ -66,6 +66,12 @@ def code_execute_node(state: ResearchState) -> dict:
         mode="full",
         data_dir=state.user_data_path or None,
     )
+
+    # 若 baseline 和 proposed 均无指标输出，且有 stderr，预标记 CODE_ERROR
+    # 避免 diagnostician 拿到空指标后误判为 insufficient
+    if not result.baseline_metrics and not result.proposed_metrics and result.stderr:
+        result = result.model_copy(update={"execution_verdict": ExecutionVerdict.CODE_ERROR})
+
     return {"experiment_result": result}
 
 
@@ -80,23 +86,33 @@ def poison_execute_node(state: ResearchState) -> dict:
         data_dir=state.user_data_path or None,
     )
 
-    # 解析扰动后指标，写入 poison_test_result
-    if state.poison_test_result is not None:
-        proposed_original = state.experiment_result.proposed_metrics if state.experiment_result else {}
-        perturbed = result.proposed_metrics  # 毒药模式下也写入 proposed_metrics
+    proposed_original = state.experiment_result.proposed_metrics if state.experiment_result else {}
+    perturbed = result.proposed_metrics
 
-        # 计算性能下降比例（取第一个主要指标）
+    # 若扰动代码执行失败（无输出），将 degradation 标为 1.0（最差），防止误判通过
+    if not perturbed and result.stderr:
+        degradation = 1.0
+    else:
         degradation = _compute_degradation(proposed_original, perturbed)
-        updated_poison = state.poison_test_result.model_copy(update={
+
+    base_poison = state.poison_test_result
+    if base_poison is not None:
+        updated_poison = base_poison.model_copy(update={
             "perturbed_metrics": perturbed,
             "degradation_rate": degradation,
         })
-        return {
-            "experiment_result": result,
-            "poison_test_result": updated_poison,
-        }
+    else:
+        from darwinian.state import PoisonTestResult
+        updated_poison = PoisonTestResult(
+            perturbation_strategy="unknown",
+            perturbed_metrics=perturbed,
+            degradation_rate=degradation,
+        )
 
-    return {"experiment_result": result}
+    return {
+        "experiment_result": result,
+        "poison_test_result": updated_poison,
+    }
 
 
 def write_insufficient_to_ledger(state: ResearchState) -> dict:
@@ -110,14 +126,19 @@ def write_insufficient_to_ledger(state: ResearchState) -> dict:
     feature_vector = get_text_embedding(text)
 
     diagnosis = state.experiment_result.diagnosis if state.experiment_result else "方法效果不足基准"
+    # 优先使用 diagnostician 提取的关键词，兜底用方法名关键词
+    banned_kw = state.last_error_keywords or _extract_method_keywords(branch.name if branch else "")
     record = FailedRecord(
         feature_vector=feature_vector,
         error_summary=diagnosis,
         failure_type="INSUFFICIENT",
         iteration=state.outer_loop_count,
-        banned_keywords=_extract_method_keywords(branch.name if branch else ""),
+        banned_keywords=banned_kw,
     )
-    return {"failed_ledger": list(state.failed_ledger) + [record]}
+    return {
+        "failed_ledger": list(state.failed_ledger) + [record],
+        "last_error_keywords": [],  # 清空
+    }
 
 
 def write_robustness_fail_to_ledger(state: ResearchState) -> dict:

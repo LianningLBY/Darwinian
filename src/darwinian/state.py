@@ -202,5 +202,12 @@ class ResearchState(BaseModel):
     outer_loop_count: int = Field(default=0, description="外层大循环次数")
     max_outer_loops: int = Field(default=5, description="外层大循环上限")
 
-    # LangGraph messages（可选，用于调试追踪）
+    # 跨节点传递的错误关键词（由 theoretical_critic / diagnostician 写入，由 ledger 节点读取）
+    last_error_keywords: list[str] = Field(default_factory=list, description="最近一次失败提取的禁用关键词")
+
+    # LangGraph messages（调试追踪，限制最大条数防止无限累积）
     messages: Annotated[list, add_messages] = Field(default_factory=list)
+
+    def trimmed_messages(self, max_count: int = 20) -> list:
+        """返回最近 max_count 条消息，避免无限累积"""
+        return self.messages[-max_count:] if len(self.messages) > max_count else self.messages

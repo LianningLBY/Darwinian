@@ -67,20 +67,25 @@ def _safe_hypothesis_generator(state: ResearchState, llm: BaseChatModel) -> dict
         # 将重复方案记录到 failed_ledger，触发重新生成
         hypothesis = state.current_hypothesis
         feature_vector = []
+        banned_kw: list[str] = []
         if hypothesis:
             text = f"{hypothesis.core_problem}"
             feature_vector = get_text_embedding(text)
+            # 从方案名中提取关键词，避免下一轮重复选择同一方向
+            import re as _re
+            banned_kw = [w for w in _re.findall(r"[a-z\u4e00-\u9fff]{3,}", text.lower())][:5]
 
         record = FailedRecord(
             feature_vector=feature_vector,
             error_summary=f"方案重复（相似度 {e.similarity:.3f}）: {e.matched_record_summary}",
             failure_type="NOT_NOVEL",
             iteration=state.outer_loop_count,
-            banned_keywords=[],
+            banned_keywords=banned_kw,
         )
         updated_ledger = list(state.failed_ledger) + [record]
         return {
             "failed_ledger": updated_ledger,
+            "current_hypothesis": None,   # 必须清空，否则下轮仍拿旧假设判重，形成死循环
             "critic_verdict": CriticVerdict.NOT_NOVEL,
             "critic_feedback": str(e),
         }
@@ -100,8 +105,8 @@ def critic_router(state: ResearchState) -> Literal["hypothesis_generator", "bott
     """
     verdict = state.critic_verdict
 
-    # 检查外层循环上限
-    if state.outer_loop_count > state.max_outer_loops:
+    # 检查外层循环上限（>= 防止多跑一轮）
+    if state.outer_loop_count >= state.max_outer_loops:
         return "__end__"
 
     if verdict == CriticVerdict.PASS:
@@ -134,13 +139,14 @@ def write_math_error_to_ledger(state: ResearchState) -> dict:
         error_summary=f"数学错误: {state.critic_feedback}",
         failure_type="MATH_ERROR",
         iteration=state.outer_loop_count,
-        banned_keywords=[],  # 由 theoretical_critic 返回，此处简化
+        banned_keywords=state.last_error_keywords,  # 来自 theoretical_critic 写入 state
     )
 
     return {
         "failed_ledger": list(state.failed_ledger) + [record],
         "current_hypothesis": None,
         "critic_verdict": None,
+        "last_error_keywords": [],  # 清空，避免污染下一轮
     }
 
 

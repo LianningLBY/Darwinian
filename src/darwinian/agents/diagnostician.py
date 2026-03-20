@@ -78,8 +78,6 @@ STDERR（前 2000 字符）：
 
     return {
         "experiment_result": updated_result,
+        "last_error_keywords": raw.get("error_keywords", []),
         "messages": [response],
-        # 供路由函数使用
-        "_failure_summary": raw.get("failure_summary", ""),
-        "_error_keywords": raw.get("error_keywords", []),
     }

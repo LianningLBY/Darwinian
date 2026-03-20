@@ -82,9 +82,8 @@ def theoretical_critic_node(state: ResearchState, llm: BaseChatModel) -> dict:
         "current_hypothesis": updated_hypothesis,
         "critic_verdict": verdict,
         "critic_feedback": result.get("feedback", ""),
+        "last_error_keywords": result.get("error_keywords", []),
         "messages": [response],
-        # 将错误关键词暴露出来，供路由函数写入 failed_ledger
-        "_error_keywords": result.get("error_keywords", []),
     }
 
 
