@@ -51,6 +51,7 @@ def preprocess_node(state: ResearchState) -> dict:
         "critic_verdict": None,
         "critic_feedback": "",
         "current_hypothesis": None,
+        "hypothesis_retry_count": 0,   # 重置内层重试计数
         # 重置实验代码/结果，避免 retry_count 跨外层循环累积
         # 不重置会导致：上轮 retry_count=5 → 新轮第一次 code_error 就被判为 INSUFFICIENT
         "experiment_code": None,
@@ -66,7 +67,10 @@ def _safe_bottleneck_miner(state: ResearchState, llm: BaseChatModel) -> dict:
 def _safe_hypothesis_generator(state: ResearchState, llm: BaseChatModel) -> dict:
     """Agent 2 包装，捕获 DuplicateHypothesisError 并记录到 failed_ledger"""
     try:
-        return hypothesis_generator_node(state, llm)
+        result = hypothesis_generator_node(state, llm)
+        # 每次调用 Agent 2 都自增内层重试计数（含初次生成）
+        result["hypothesis_retry_count"] = state.hypothesis_retry_count + 1
+        return result
     except DuplicateHypothesisError as e:
         # 将重复方案记录到 failed_ledger，触发重新生成
         hypothesis = state.current_hypothesis
@@ -109,13 +113,12 @@ def critic_router(state: ResearchState) -> Literal["hypothesis_generator", "bott
     """
     verdict = state.critic_verdict
 
-    # 检查外层循环上限（>= 防止多跑一轮）
-    if state.outer_loop_count >= state.max_outer_loops:
-        return "__end__"
-
     if verdict == CriticVerdict.PASS:
         return "__end__"
     elif verdict == CriticVerdict.NOT_NOVEL:
+        # 用独立内层计数器限制 NOT_NOVEL 重试，不再误用外层循环计数
+        if state.hypothesis_retry_count >= MAX_CRITIC_RETRIES:
+            return "__end__"   # 内层耗尽，放弃本轮假设（selected_branch=None → phase1_router 终止）
         return "hypothesis_generator"
     elif verdict == CriticVerdict.MATH_ERROR:
         return "bottleneck_miner"
