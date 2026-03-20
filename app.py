@@ -452,14 +452,14 @@ AGENTS = [
 
 # 每个 Agent 的 LLM 具体任务说明（显示在 OUTPUT TRACE 中）
 AGENT_TASKS: dict[str, str] = {
-    "bottleneck_miner":     "📚 文献检索 · 提取 Limitations · 识别核心矛盾",
-    "hypothesis_generator": "💡 跨域假设生成 · 构建解决方案树",
-    "theoretical_critic":   "⚖️ 数学可行性审查 · 新颖性验证",
-    "code_architect":       "🏗️ 实验代码生成 · Baseline vs Proposed",
-    "diagnostician":        "🩺 错误诊断 · 区分代码缺陷 / 逻辑缺陷",
-    "poison_generator":     "☠️ 对抗性数据生成 · 鲁棒性测试",
-    "publish_evaluator":    "🏆 结果验收 · 发表可行性评估 · 生成报告",
-    "dataset_finder":       "🗄️ 数据集搜索 · 匹配最优数据集",
+    "bottleneck_miner":     "📚 Literature Search · Extract Limitations · Identify Contradictions",
+    "hypothesis_generator": "💡 Cross-domain Hypothesis Generation · Build Solution Tree",
+    "theoretical_critic":   "⚖️ Mathematical Feasibility Review · Novelty Validation",
+    "code_architect":       "🏗️ Experiment Code Generation · Baseline vs Proposed",
+    "diagnostician":        "🩺 Error Diagnosis · Code Bug vs Logic Flaw",
+    "poison_generator":     "☠️ Adversarial Data Generation · Robustness Testing",
+    "publish_evaluator":    "🏆 Result Evaluation · Publishability Assessment · Report Generation",
+    "dataset_finder":       "🗄️ Dataset Search · Match Optimal Dataset",
 }
 
 # ──────────────────────────────────────────────
@@ -1186,10 +1186,10 @@ if st.session_state.running:
                 if aid and st.session_state.agent_status[aid] == "pending":
                     st.session_state.agent_status[aid] = "running"
                     label = next((n for a, _, n, _ in AGENTS if a == aid), node_name)
-                    _add_log("info", f"→ 开始执行 {label}")
+                    _add_log("info", f"→ Start {label}")
                 elif aid and st.session_state.agent_status[aid] == "running":
                     label = next((n for a, _, n, _ in AGENTS if a == aid), node_name)
-                    _add_log("ok", f"✓ 完成 {label}")
+                    _add_log("ok", f"✓ Done {label}")
             _apply_chunk(payload)
             # 节点完成后追加摘要日志
             for node_name, update in payload.items():
@@ -1197,25 +1197,25 @@ if st.session_state.running:
                     continue
                 if "critic_verdict" in update and update["critic_verdict"]:
                     v = update["critic_verdict"]
-                    _add_log("info", f"  审查结论: {v.value if hasattr(v,'value') else v}")
+                    _add_log("info", f"  Critic verdict: {v.value if hasattr(v,'value') else v}")
                 if "current_hypothesis" in update and update["current_hypothesis"]:
                     h = update["current_hypothesis"]
                     if hasattr(h, "core_problem") and h.core_problem:
-                        _add_log("info", f"  核心问题: {h.core_problem[:80]}")
+                        _add_log("info", f"  Core problem: {h.core_problem[:80]}")
                 if "experiment_result" in update and update["experiment_result"]:
                     er = update["experiment_result"]
                     if hasattr(er, "execution_verdict") and er.execution_verdict:
-                        _add_log("info", f"  执行结果: {er.execution_verdict.value if hasattr(er.execution_verdict,'value') else er.execution_verdict}")
+                        _add_log("info", f"  Execution verdict: {er.execution_verdict.value if hasattr(er.execution_verdict,'value') else er.execution_verdict}")
                 if "final_verdict" in update and update["final_verdict"]:
                     fv = update["final_verdict"]
                     _add_log("ok" if str(fv) == "publish_ready" else "warn",
-                             f"  最终裁决: {fv.value if hasattr(fv,'value') else fv}")
+                             f"  Final verdict: {fv.value if hasattr(fv,'value') else fv}")
                 if "failed_ledger" in update:
                     ledger = update["failed_ledger"]
                     if ledger:
                         last = ledger[-1]
                         summary = last.error_summary if hasattr(last, "error_summary") else str(last)
-                        _add_log("warn", f"  写入账本: {summary[:80]}")
+                        _add_log("warn", f"  Ledger entry: {summary[:80]}")
         elif msg_type == "stream_start":
             # 记录当前正在运行的 agent 名称及任务说明
             running_aid  = next(
@@ -1228,7 +1228,7 @@ if st.session_state.running:
                  if st.session_state.agent_status.get(aid) == "running"),
                 "LLM",
             )
-            task_desc = AGENT_TASKS.get(running_aid, "LLM 推理中")
+            task_desc = AGENT_TASKS.get(running_aid, "LLM Inference")
             st.session_state._stream_agent      = running_name
             st.session_state._stream_agent_task = task_desc
             st.session_state.current_stream     = ""
@@ -1259,12 +1259,12 @@ if st.session_state.running:
         elif msg_type == "done":
             st.session_state.running = False
             st.session_state.finished = True
-            _add_log("ok", "━━ 研究流程结束 ━━")
+            _add_log("ok", "━━ Research pipeline complete ━━")
         elif msg_type == "error":
             st.session_state.running = False
             st.session_state.finished = True
             st.session_state["_error"] = payload
-            _add_log("error", f"运行出错: {payload.splitlines()[-1] if payload else '未知错误'}")
+            _add_log("error", f"Runtime error: {payload.splitlines()[-1] if payload else 'unknown error'}")
 
 # ── 布局：单列纵向 ──
 def _section(title: str):
