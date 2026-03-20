@@ -184,6 +184,7 @@ def _init_state():
         "critic_verdict":   "",
         "logs":             [],   # list of (timestamp_str, level, message)
         "agent_detail":     {a[0]: {} for a in AGENTS},
+        "current_stream":   "",   # 当前 LLM 流式输出缓冲
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -383,20 +384,41 @@ def _make_queue_callback(q: queue.Queue):
         def __init__(self):
             super().__init__()
             self._q = q
+            self._buf: list[str] = []
+            self._buf_len = 0
+
+        def _flush(self):
+            if self._buf:
+                self._q.put(("stream_chunk", "".join(self._buf)))
+                self._buf = []
+                self._buf_len = 0
 
         def on_llm_start(self, serialized, prompts, **kwargs):
+            self._buf = []
+            self._buf_len = 0
+            self._q.put(("stream_start", None))
             self._q.put(("log", ("info", "  ⌛ LLM 开始推理（等待模型响应）...")))
 
+        def on_llm_new_token(self, token: str, **kwargs):
+            self._buf.append(token)
+            self._buf_len += len(token)
+            if self._buf_len >= 60:   # 每攒够 60 字符推一次，平衡实时性与队列压力
+                self._flush()
+
         def on_llm_end(self, response, **kwargs):
+            self._flush()
             try:
                 usage = response.llm_output.get("token_usage", {}) if response.llm_output else {}
                 total = usage.get("total_tokens") or usage.get("total_token_count")
                 suffix = f"  共 {total} tokens" if total else ""
             except Exception:
                 suffix = ""
+            self._q.put(("stream_end", None))
             self._q.put(("log", ("ok", f"  ✓ LLM 响应完成，解析输出中...{suffix}")))
 
         def on_llm_error(self, error, **kwargs):
+            self._flush()
+            self._q.put(("stream_end", None))
             self._q.put(("log", ("error", f"  ✗ LLM 出错: {str(error)[:120]}")))
 
     return _QueueCallback()
@@ -439,12 +461,12 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
         if provider == "Anthropic":
             os.environ["ANTHROPIC_API_KEY"] = api_key
             from langchain_anthropic import ChatAnthropic
-            llm = ChatAnthropic(model=model, max_tokens=8192, callbacks=[cb])
+            llm = ChatAnthropic(model=model, max_tokens=8192, streaming=True, callbacks=[cb])
 
         elif provider == "OpenAI":
             os.environ["OPENAI_API_KEY"] = api_key
             from langchain_openai import ChatOpenAI
-            llm = ChatOpenAI(model=model, max_tokens=8192, callbacks=[cb])
+            llm = ChatOpenAI(model=model, max_tokens=8192, streaming=True, callbacks=[cb])
 
         elif provider == "MiniMax":
             # MiniMax 提供 OpenAI 兼容接口
@@ -454,6 +476,7 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
                 api_key=api_key,
                 base_url="https://api.minimax.chat/v1",
                 max_tokens=8192,
+                streaming=True,
                 callbacks=[cb],
             )
 
@@ -712,6 +735,7 @@ with st.sidebar:
             "current_hypothesis": "", "critic_verdict": "",
             "logs": [], "_error": "",
             "agent_detail": {a[0]: {} for a in AGENTS},
+            "current_stream": "",
         }.items():
             st.session_state[k] = v
 
@@ -798,6 +822,12 @@ if st.session_state.running:
                         last = ledger[-1]
                         summary = last.error_summary if hasattr(last, "error_summary") else str(last)
                         _add_log("warn", f"  写入账本: {summary[:80]}")
+        elif msg_type == "stream_start":
+            st.session_state.current_stream = ""
+        elif msg_type == "stream_chunk":
+            st.session_state.current_stream += payload
+        elif msg_type == "stream_end":
+            pass  # 保留最终内容，由下一个 stream_start 清空
         elif msg_type == "log":
             _add_log(payload[0], payload[1])
         elif msg_type == "done":
@@ -817,6 +847,44 @@ with col_left:
     st.markdown("### 🔄 研究流程")
     for agent_id, icon, name, desc in AGENTS:
         render_agent_card(agent_id, icon, name, desc)
+
+    # 流式输出
+    stream_text = st.session_state.get("current_stream", "")
+    if stream_text:
+        st.markdown("### 💬 模型实时输出")
+        # 把 <think>...</think> 部分用灰色折叠展示，正文用白色
+        think_match = __import__("re").search(r"<think>([\s\S]*?)</think>([\s\S]*)", stream_text)
+        if think_match:
+            think_part = think_match.group(1).strip()
+            rest_part  = think_match.group(2).strip()
+            with st.expander("🤔 推理过程", expanded=False):
+                st.markdown(
+                    f'<div style="font-size:0.78rem;color:#8b949e;white-space:pre-wrap;'
+                    f'font-family:monospace;max-height:300px;overflow-y:auto">{think_part}</div>',
+                    unsafe_allow_html=True,
+                )
+            if rest_part:
+                st.markdown(
+                    f'<div style="font-size:0.82rem;color:#e6edf3;white-space:pre-wrap;'
+                    f'background:#0d1117;border:1px solid #21262d;border-radius:6px;'
+                    f'padding:12px;max-height:300px;overflow-y:auto;font-family:monospace">'
+                    f'{rest_part}</div>',
+                    unsafe_allow_html=True,
+                )
+        else:
+            # 还在推理中（think 块未闭合）或无 think 块
+            in_think = "<think>" in stream_text and "</think>" not in stream_text
+            color = "#8b949e" if in_think else "#e6edf3"
+            label = "🤔 推理中..." if in_think else ""
+            if label:
+                st.caption(label)
+            st.markdown(
+                f'<div style="font-size:0.82rem;color:{color};white-space:pre-wrap;'
+                f'background:#0d1117;border:1px solid #21262d;border-radius:6px;'
+                f'padding:12px;max-height:300px;overflow-y:auto;font-family:monospace">'
+                f'{stream_text[-3000:]}</div>',  # 只显示最后 3000 字符防止爆版
+                unsafe_allow_html=True,
+            )
 
     # 实时日志
     st.markdown("### 🖥️ 运行日志")
