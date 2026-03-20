@@ -124,6 +124,25 @@ st.markdown("""
     background: #1f2937; color: #60a5fa; border: 1px solid #374151;
 }
 
+/* Agent 详情块 */
+.agent-detail {
+    margin-top: 10px; padding: 10px 12px;
+    background: #0d1117; border-radius: 6px;
+    border: 1px solid #21262d; font-size: 0.8rem;
+}
+.ad-row { display: flex; align-items: baseline; gap: 8px; margin-bottom: 5px; }
+.ad-label { color: #8b949e; white-space: nowrap; min-width: 60px; }
+.ad-value { color: #e6edf3; }
+.ad-badge { padding: 2px 8px; border-radius: 4px; font-size: 0.75rem; font-weight: 600; }
+.ad-pass  { background: #0a1f10; color: #3fb950; border: 1px solid #3fb950; }
+.ad-fail  { background: #1f0a0a; color: #f85149; border: 1px solid #f85149; }
+.ad-warn  { background: #1f1a0a; color: #d29922; border: 1px solid #d29922; }
+.ad-feedback { color: #c9d1d9; margin-top: 4px; line-height: 1.5; }
+.ad-ev { color: #8b949e; margin-bottom: 3px; }
+.ad-hyp { margin-bottom: 6px; }
+.ad-hyp-name { font-weight: 600; color: #79c0ff; margin-right: 6px; }
+.ad-hyp-desc { color: #c9d1d9; }
+
 /* 流水线步骤可视化 */
 .pipeline {
     display: flex; align-items: center; flex-wrap: nowrap;
@@ -207,6 +226,7 @@ def _init_state():
         "current_hypothesis": "",
         "critic_verdict":   "",
         "logs":             [],   # list of (timestamp_str, level, message)
+        "agent_detail":     {a[0]: {} for a in AGENTS},
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -230,12 +250,70 @@ def render_header():
     """, unsafe_allow_html=True)
 
 
+def _render_agent_detail(agent_id: str) -> str:
+    """把 agent_detail[agent_id] 渲染为 HTML 片段。"""
+    d = st.session_state.agent_detail.get(agent_id, {})
+    if not d:
+        return ""
+    parts = []
+
+    if agent_id == "bottleneck_miner":
+        if d.get("core_problem"):
+            parts.append(f'<div class="ad-row"><span class="ad-label">核心矛盾</span>'
+                         f'<span class="ad-value">{d["core_problem"]}</span></div>')
+        for ev in d.get("evidence", [])[:3]:
+            parts.append(f'<div class="ad-ev">📄 {ev}</div>')
+
+    elif agent_id == "hypothesis_generator":
+        for h in d.get("hypotheses", []):
+            parts.append(f'<div class="ad-hyp"><span class="ad-hyp-name">{h["name"]}</span>'
+                         f'<span class="ad-hyp-desc">{h["desc"]}</span></div>')
+
+    elif agent_id == "theoretical_critic":
+        verdict = d.get("verdict", "")
+        vcls = {"PASS": "ad-pass", "MATH_ERROR": "ad-fail", "NOT_NOVEL": "ad-warn"}.get(verdict, "")
+        parts.append(f'<div class="ad-row"><span class="ad-label">裁决</span>'
+                     f'<span class="ad-badge {vcls}">{verdict}</span></div>')
+        if d.get("feedback"):
+            parts.append(f'<div class="ad-feedback">{d["feedback"][:200]}</div>')
+
+    elif agent_id == "code_architect":
+        if d.get("dataset"):
+            parts.append(f'<div class="ad-row"><span class="ad-label">数据集</span>'
+                         f'<span class="ad-value">{d["dataset"]}</span></div>')
+        if d.get("method"):
+            parts.append(f'<div class="ad-row"><span class="ad-label">方法</span>'
+                         f'<span class="ad-value">{d["method"]}</span></div>')
+
+    elif agent_id == "diagnostician":
+        verdict = d.get("verdict", "")
+        vcls = {"SUCCESS": "ad-pass", "CODE_BUG": "ad-warn", "LOGIC_FLAW": "ad-fail"}.get(verdict, "")
+        parts.append(f'<div class="ad-row"><span class="ad-label">诊断</span>'
+                     f'<span class="ad-badge {vcls}">{verdict}</span></div>')
+        if d.get("diagnosis"):
+            parts.append(f'<div class="ad-feedback">{d["diagnosis"][:200]}</div>')
+
+    elif agent_id == "poison_generator":
+        if d.get("strategy"):
+            parts.append(f'<div class="ad-row"><span class="ad-label">扰动策略</span>'
+                         f'<span class="ad-value">{d["strategy"]}</span></div>')
+
+    elif agent_id == "publish_evaluator":
+        verdict = d.get("verdict", "")
+        vcls = "ad-pass" if verdict == "publish_ready" else "ad-fail"
+        label = "✅ 达到发表标准" if verdict == "publish_ready" else "⚠️ 未通过"
+        parts.append(f'<div class="ad-row"><span class="ad-label">最终裁决</span>'
+                     f'<span class="ad-badge {vcls}">{label}</span></div>')
+
+    if not parts:
+        return ""
+    return '<div class="agent-detail">' + "".join(parts) + "</div>"
+
+
 def render_agent_card(agent_id: str, icon: str, name: str, desc: str):
     status = st.session_state.agent_status.get(agent_id, "pending")
-    output = st.session_state.agent_output.get(agent_id, "")
-
     status_icon = {"pending": "⬜", "running": "⏳", "done": "✅", "error": "❌"}.get(status, "⬜")
-    output_html = f'<div class="agent-output">{output}</div>' if output else ""
+    detail_html = _render_agent_detail(agent_id) if status == "done" else ""
 
     st.markdown(f"""
     <div class="agent-card {status}">
@@ -246,7 +324,7 @@ def render_agent_card(agent_id: str, icon: str, name: str, desc: str):
                 <span>{status_icon}</span>
             </div>
             <div class="agent-desc">{desc}</div>
-            {output_html}
+            {detail_html}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -564,35 +642,62 @@ def _node_to_agent_id(node_name: str) -> str | None:
 
 
 def _extract_agent_output(agent_id: str, update: Any):
-    """从节点更新中提取简短摘要写入 agent_output。"""
+    """从节点更新中提取结构化数据写入 agent_detail。"""
     if not isinstance(update, dict):
         return
+    det = st.session_state.agent_detail
+
     if agent_id == "bottleneck_miner" and "current_hypothesis" in update:
         h = update["current_hypothesis"]
         if hasattr(h, "core_problem"):
-            st.session_state.agent_output[agent_id] = f"核心矛盾：{h.core_problem[:120]}"
+            det[agent_id] = {
+                "core_problem": h.core_problem,
+                "evidence": list(h.literature_support) if hasattr(h, "literature_support") else [],
+            }
+
     elif agent_id == "hypothesis_generator" and "current_hypothesis" in update:
         h = update["current_hypothesis"]
         if hasattr(h, "abstraction_tree") and h.abstraction_tree:
-            names = ", ".join(b.name for b in h.abstraction_tree[:3])
-            st.session_state.agent_output[agent_id] = f"生成方案：{names}"
+            det[agent_id] = {
+                "hypotheses": [
+                    {"name": b.name, "desc": getattr(b, "description", "")[:100]}
+                    for b in h.abstraction_tree[:4]
+                ]
+            }
+
     elif agent_id == "theoretical_critic" and "critic_verdict" in update:
         v = update["critic_verdict"]
-        verdict_str = v.value if hasattr(v, "value") else str(v)
-        fb = update.get("critic_feedback", "")[:100]
-        st.session_state.agent_output[agent_id] = f"裁决：{verdict_str}　{fb}"
+        det[agent_id] = {
+            "verdict": v.value if hasattr(v, "value") else str(v),
+            "feedback": update.get("critic_feedback", ""),
+        }
+
+    elif agent_id == "code_architect" and "experiment_code" in update:
+        ec = update["experiment_code"]
+        det[agent_id] = {
+            "dataset": getattr(ec, "dataset_name", "") or getattr(ec, "dataset_loader_code", "")[:60],
+            "method": getattr(ec, "proposed_method_code", "")[:80],
+        }
+
     elif agent_id == "diagnostician" and "experiment_result" in update:
         er = update["experiment_result"]
-        if hasattr(er, "diagnosis"):
-            st.session_state.agent_output[agent_id] = er.diagnosis[:120]
+        verdict = getattr(er, "execution_verdict", None)
+        det[agent_id] = {
+            "verdict": verdict.value if hasattr(verdict, "value") else str(verdict),
+            "diagnosis": getattr(er, "diagnosis", ""),
+        }
+
     elif agent_id == "poison_generator" and "poison_test_result" in update:
         ptr = update["poison_test_result"]
-        if hasattr(ptr, "perturbation_strategy"):
-            st.session_state.agent_output[agent_id] = f"策略：{ptr.perturbation_strategy}"
+        det[agent_id] = {
+            "strategy": getattr(ptr, "perturbation_strategy", ""),
+        }
+
     elif agent_id == "publish_evaluator" and "final_verdict" in update:
         fv = update["final_verdict"]
-        verdict_str = fv.value if hasattr(fv, "value") else str(fv)
-        st.session_state.agent_output[agent_id] = f"最终裁决：{verdict_str}"
+        det[agent_id] = {
+            "verdict": fv.value if hasattr(fv, "value") else str(fv),
+        }
 
 
 # ──────────────────────────────────────────────
@@ -668,6 +773,7 @@ with st.sidebar:
             "log_queue": queue.Queue(),
             "current_hypothesis": "", "critic_verdict": "",
             "logs": [], "_error": "",
+            "agent_detail": {a[0]: {} for a in AGENTS},
         }.items():
             st.session_state[k] = v
 
