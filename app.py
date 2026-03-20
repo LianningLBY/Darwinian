@@ -40,226 +40,370 @@ st.set_page_config(
 # ──────────────────────────────────────────────
 st.markdown("""
 <style>
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
 
-/* ── 全局 ── */
-html, body, [class*="css"] { font-family: 'Inter', -apple-system, sans-serif; }
-.main .block-container { padding-top: 1rem; max-width: 1400px; }
-section[data-testid="stSidebar"] { background: #0a0d14 !important; border-right: 1px solid #1e2330; }
+/* ── Reset & Base ── */
+html, body, [class*="css"] {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+}
+body, .stApp { background-color: #07090d !important; }
+.main .block-container {
+    padding-top: 0.75rem;
+    max-width: 1440px;
+    background: #07090d;
+}
 
-/* ── 顶栏 ── */
+/* ── Hide Streamlit default header chrome ── */
+header[data-testid="stHeader"] { display: none !important; }
+#MainMenu { visibility: hidden; }
+footer { display: none !important; }
+
+/* ── Sidebar ── */
+section[data-testid="stSidebar"] {
+    background: #07090d !important;
+    border-right: 1px solid #131929 !important;
+}
+section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
+
+/* ── Header ── */
 .app-header {
-    position: relative;
-    padding: 20px 0 16px;
-    margin-bottom: 28px;
+    padding: 18px 0 14px;
+    margin-bottom: 24px;
+    border-bottom: 1px solid #131929;
 }
-.app-header::before {
-    content: '';
-    position: absolute; top: 0; left: 0; right: 0; height: 2px;
-    background: linear-gradient(90deg, #6366f1, #8b5cf6, #06b6d4, transparent);
-    border-radius: 1px;
+.app-header-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
 }
-.app-header-inner { display: flex; align-items: center; gap: 16px; }
-.app-header-logo {
-    width: 48px; height: 48px; border-radius: 12px;
-    background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1.6rem; box-shadow: 0 0 20px rgba(99,102,241,0.4);
-    flex-shrink: 0;
+.app-header-left { display: flex; flex-direction: column; gap: 2px; }
+.app-header-wordmark {
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 3px;
+    text-transform: uppercase;
+    color: #dde1ea;
 }
-.app-header h1 {
-    margin: 0; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.5px;
-    background: linear-gradient(135deg, #e2e8f0 0%, #94a3b8 100%);
-    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+.app-header-sub {
+    font-size: 0.65rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #3d4a5c;
+    font-weight: 400;
 }
-.app-header .subtitle {
-    color: #475569; font-size: 0.82rem; margin-top: 3px; letter-spacing: 0.3px;
+.live-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.63rem;
+    font-weight: 600;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #6366f1;
+    border: 1px solid rgba(99,102,241,0.3);
+    border-radius: 3px;
+    padding: 3px 9px;
+    background: rgba(99,102,241,0.06);
 }
-.app-header .badge-row { display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap; }
-.hbadge {
-    font-size: 0.68rem; padding: 2px 8px; border-radius: 20px; font-weight: 500;
-    border: 1px solid #1e2330; color: #64748b; background: #0f1420;
+.live-badge .live-dot {
+    width: 5px; height: 5px; border-radius: 50%;
+    background: #6366f1;
+    animation: pulsedot 1.6s ease-in-out infinite;
+}
+.static-badge {
+    font-size: 0.63rem;
+    font-weight: 500;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: #3d4a5c;
+    border: 1px solid #131929;
+    border-radius: 3px;
+    padding: 3px 9px;
 }
 
-/* ── Section 标题 ── */
+/* ── Section titles ── */
 .section-title {
-    font-size: 0.72rem; font-weight: 600; letter-spacing: 1.2px;
-    text-transform: uppercase; color: #475569;
-    margin: 20px 0 12px; display: flex; align-items: center; gap: 8px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: #3d4a5c;
+    margin: 22px 0 10px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 .section-title::after {
-    content: ''; flex: 1; height: 1px; background: #1e2330;
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: #131929;
 }
 
-/* ── Agent 卡片 ── */
+/* ── Agent cards ── */
 .agent-card {
-    display: flex; align-items: flex-start; gap: 14px;
-    padding: 12px 14px 12px 0;
-    border-radius: 10px;
-    margin-bottom: 6px;
-    border: 1px solid #1e2330;
-    border-left: 3px solid #1e2330;
-    background: #0d1017;
-    transition: border-color 0.25s ease, background 0.25s ease, box-shadow 0.25s ease;
+    position: relative;
+    padding: 14px 16px;
+    border-radius: 6px;
+    margin-bottom: 5px;
+    background: #0b0e15;
+    border: 1px solid #131929;
+    border-left: 2px solid #131929;
+    transition: border-color 0.2s, background 0.2s;
 }
 .agent-card.running {
-    border-color: rgba(99,102,241,0.35);
     border-left-color: #6366f1;
-    background: linear-gradient(135deg, #0d1017 0%, #0f1128 100%);
-    box-shadow: 0 0 0 1px rgba(99,102,241,0.08), 0 4px 20px rgba(99,102,241,0.05);
+    background: #0c0f1a;
+    border-color: #1a1f35;
 }
-.agent-card.done  { border-color: rgba(16,185,129,0.2); border-left-color: #10b981; }
-.agent-card.error { border-color: rgba(239,68,68,0.25); border-left-color: #ef4444; }
-.agent-card.pending { opacity: 0.38; }
-
-.agent-card.running .agent-name { color: #a5b4fc; }
-.agent-card.done    .agent-name { color: #6ee7b7; }
-
-.agent-icon {
-    font-size: 1.2rem; line-height: 1;
-    width: 34px; height: 34px; border-radius: 8px;
-    background: #131820; display: flex; align-items: center;
-    justify-content: center; flex-shrink: 0; margin-top: 1px; margin-left: 12px;
-    border: 1px solid #1e2330;
+.agent-card.done {
+    border-left-color: #10b981;
+    border-color: #131d1a;
 }
-.agent-card.running .agent-icon { background: #131828; border-color: rgba(99,102,241,0.3); }
-.agent-card.done    .agent-icon { background: #0b1a14; border-color: rgba(16,185,129,0.2); }
-
-.agent-name {
-    font-weight: 600; font-size: 0.88rem; color: #cbd5e1; letter-spacing: 0.1px;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+.agent-card.error {
+    border-left-color: #ef4444;
+    border-color: #1f1316;
 }
-.agent-desc { font-size: 0.76rem; color: #334155; margin-top: 3px; line-height: 1.4; }
-.agent-status-row { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.agent-card.pending {
+    opacity: 0.3;
+}
 
-/* running 脉冲点 */
+/* Status pill — top right corner */
+.agent-status-pill {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    font-size: 0.58rem;
+    font-weight: 700;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    padding: 2px 7px;
+    border-radius: 3px;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+}
+.pill-queued  { color: #3d4a5c; background: transparent; border: 1px solid #131929; }
+.pill-running { color: #818cf8; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); }
+.pill-done    { color: #10b981; background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.2); }
+.pill-error   { color: #ef4444; background: rgba(239,68,68,0.07);  border: 1px solid rgba(239,68,68,0.2); }
+
+/* Agent card body */
+.agent-headline {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #dde1ea;
+    margin-bottom: 3px;
+    padding-right: 80px;
+    letter-spacing: 0.1px;
+}
+.agent-card.running .agent-headline { color: #a5b4fc; }
+.agent-card.done    .agent-headline { color: #6ee7b7; }
+.agent-excerpt {
+    font-size: 0.73rem;
+    color: #3d4a5c;
+    line-height: 1.45;
+}
+
+/* running pulse */
 .pulse-dot {
-    width: 7px; height: 7px; border-radius: 50%;
+    width: 5px; height: 5px; border-radius: 50%;
     background: #6366f1;
+    display: inline-block;
     animation: pulsedot 1.4s ease-in-out infinite;
-    flex-shrink: 0;
 }
 @keyframes pulsedot {
     0%,100% { opacity: 1; transform: scale(1); }
-    50%      { opacity: 0.4; transform: scale(0.7); }
+    50%      { opacity: 0.3; transform: scale(0.6); }
 }
 
-/* ── Agent 详情 ── */
+/* ── Agent detail ── */
 .agent-detail {
-    margin-top: 10px; padding: 10px 12px;
-    background: rgba(6,9,15,0.8); border-radius: 7px;
-    border: 1px solid #1a2035; font-size: 0.79rem;
+    margin-top: 10px;
+    padding: 10px 12px;
+    background: #07090d;
+    border-radius: 5px;
+    border: 1px solid #131929;
+    font-size: 0.77rem;
 }
 .ad-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
 .ad-label {
-    color: #334155; white-space: nowrap; min-width: 56px;
-    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.6px;
+    color: #3d4a5c;
+    white-space: nowrap;
+    min-width: 60px;
+    font-size: 0.65rem;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
     padding-top: 2px;
+    font-weight: 500;
 }
-.ad-value { color: #94a3b8; line-height: 1.5; }
+.ad-value { color: #6b7a8d; line-height: 1.5; }
 .ad-badge {
-    padding: 2px 9px; border-radius: 5px;
-    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.3px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
 }
-.ad-pass { background: rgba(16,185,129,0.12); color: #34d399; border: 1px solid rgba(16,185,129,0.25); }
-.ad-fail { background: rgba(239,68,68,0.1);   color: #f87171; border: 1px solid rgba(239,68,68,0.25); }
-.ad-warn { background: rgba(251,191,36,0.1);  color: #fbbf24; border: 1px solid rgba(251,191,36,0.25); }
-.ad-feedback { color: #64748b; margin-top: 5px; line-height: 1.6; font-size: 0.78rem; }
+.ad-pass { background: rgba(16,185,129,0.10); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
+.ad-fail { background: rgba(239,68,68,0.08);  color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
+.ad-warn { background: rgba(217,119,6,0.08);  color: #d97706; border: 1px solid rgba(217,119,6,0.2); }
+.ad-feedback { color: #3d4a5c; margin-top: 5px; line-height: 1.6; font-size: 0.75rem; }
 .ad-ev {
-    color: #334155; margin-bottom: 3px; padding-left: 10px;
-    border-left: 2px solid #1e2330;
+    color: #3d4a5c;
+    margin-bottom: 3px;
+    padding-left: 10px;
+    border-left: 2px solid #131929;
+    font-size: 0.73rem;
 }
 .ad-hyp {
-    margin-bottom: 7px; padding: 7px 10px;
-    background: #0a0d14; border-radius: 5px; border: 1px solid #1a2035;
+    margin-bottom: 6px;
+    padding: 7px 10px;
+    background: #0b0e15;
+    border-radius: 4px;
+    border: 1px solid #131929;
 }
-.ad-hyp-name { font-weight: 600; color: #818cf8; display: block; margin-bottom: 2px; }
-.ad-hyp-desc { color: #475569; font-size: 0.76rem; line-height: 1.5; }
+.ad-hyp-name { font-weight: 600; color: #6366f1; display: block; margin-bottom: 2px; font-size: 0.75rem; }
+.ad-hyp-desc { color: #3d4a5c; font-size: 0.72rem; line-height: 1.5; }
 
-/* ── 发表矩阵 ── */
+/* ── Publish matrix ── */
 .publish-matrix {
-    display: grid; grid-template-columns: 1fr 1fr;
-    gap: 10px; margin-top: 4px;
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    margin-top: 4px;
+    border: 1px solid #131929;
+    border-radius: 5px;
+    overflow: hidden;
 }
 .matrix-item {
-    padding: 16px 14px; border-radius: 10px;
-    border: 1px solid #1e2330; text-align: center;
-    background: #0a0d14; position: relative; overflow: hidden;
-    transition: all 0.3s;
+    flex: 1;
+    padding: 14px 10px;
+    text-align: center;
+    background: #0b0e15;
+    border-right: 1px solid #131929;
+    transition: background 0.2s;
 }
-.matrix-item.green {
-    border-color: rgba(16,185,129,0.3);
-    background: linear-gradient(135deg, #061410 0%, #091a13 100%);
-    box-shadow: 0 0 20px rgba(16,185,129,0.05);
+.matrix-item:last-child { border-right: none; }
+.matrix-item.green { background: #080f0d; }
+.matrix-item.grey  { opacity: 0.4; }
+.matrix-icon {
+    font-size: 1.2rem;
+    display: block;
+    margin-bottom: 6px;
+    line-height: 1;
 }
-.matrix-item.grey { opacity: 0.5; }
 .matrix-label {
-    font-size: 0.72rem; font-weight: 500; letter-spacing: 0.6px;
-    text-transform: uppercase; color: #475569; margin-bottom: 8px;
+    font-size: 0.62rem;
+    font-weight: 600;
+    letter-spacing: 0.8px;
+    text-transform: uppercase;
+    color: #3d4a5c;
+    margin-bottom: 5px;
+    display: block;
 }
-.matrix-icon { font-size: 1.6rem; display: block; margin-bottom: 4px; }
-.matrix-status {
-    font-size: 0.72rem; font-weight: 600;
-    color: #1e2330;
-}
-.matrix-item.green .matrix-status { color: #34d399; }
+.matrix-pass   { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.8px; color: #10b981; text-transform: uppercase; }
+.matrix-pending { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.8px; color: #1e2a38; text-transform: uppercase; }
 
-/* ── 日志控制台 ── */
+/* ── Log console ── */
 .log-console {
-    background: #060810; border: 1px solid #1a2035;
-    border-radius: 10px; overflow: hidden;
+    background: #030407;
+    border: 1px solid #131929;
+    border-radius: 6px;
+    overflow: hidden;
 }
 .log-console-header {
-    padding: 8px 14px; background: #0a0d16;
-    border-bottom: 1px solid #1a2035;
-    display: flex; align-items: center; gap: 8px;
+    padding: 7px 12px;
+    background: #07090d;
+    border-bottom: 1px solid #131929;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
-.log-dot { width: 8px; height: 8px; border-radius: 50%; }
+.log-dot { width: 7px; height: 7px; border-radius: 50%; }
+.log-console-filename {
+    font-size: 0.62rem;
+    color: #3d4a5c;
+    margin-left: 8px;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
+    letter-spacing: 0.5px;
+}
 .log-console-body {
-    padding: 10px 14px; height: 220px; overflow-y: auto;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    font-size: 0.75rem; line-height: 1.75;
+    padding: 10px 14px;
+    height: 200px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
+    font-size: 0.72rem;
+    line-height: 1.7;
+    background: #030407;
 }
 
-/* ── 指标表 ── */
+/* ── Metrics table ── */
 .metrics-table {
-    width: 100%; border-collapse: collapse; font-size: 0.82rem;
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.79rem;
 }
-.metrics-table thead tr {
-    background: #080b12;
-}
+.metrics-table thead tr { background: #07090d; }
 .metrics-table th {
-    text-align: left; padding: 9px 14px;
-    border-bottom: 1px solid #1e2330;
-    color: #334155; font-weight: 500;
-    font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.8px;
+    text-align: left;
+    padding: 8px 12px;
+    border-bottom: 1px solid #131929;
+    color: #3d4a5c;
+    font-weight: 500;
+    font-size: 0.62rem;
+    text-transform: uppercase;
+    letter-spacing: 1px;
 }
-.metrics-table td { padding: 9px 14px; border-bottom: 1px solid #10151f; color: #64748b; }
-.metrics-table tbody tr:hover td { background: #080b12; }
-.metrics-table .better { color: #34d399; font-weight: 600; }
-.metrics-table .worse  { color: #f87171; }
-.metrics-table td:first-child { color: #94a3b8; font-weight: 500; }
+.metrics-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #0e1118;
+    color: #3d4a5c;
+}
+.metrics-table tbody tr:nth-child(even) td { background: #09090e; }
+.metrics-table tbody tr:hover td { background: #0c0e16; }
+.metrics-table .better { color: #10b981; font-weight: 600; }
+.metrics-table .worse  { color: #ef4444; }
+.metrics-table td:first-child { color: #6b7a8d; font-weight: 500; }
 
-/* ── 认知账本 ── */
+/* ── Failed ledger ── */
 .ledger-item {
-    padding: 10px 14px; border-radius: 8px;
-    border: 1px solid #1e2330; border-left: 3px solid #ef4444;
-    background: #080b12; margin-bottom: 6px;
-    font-size: 0.79rem; color: #64748b;
+    padding: 10px 14px;
+    border-radius: 5px;
+    border: 1px solid #131929;
+    border-left: 2px solid #ef4444;
+    background: #0b0e15;
+    margin-bottom: 5px;
+    font-size: 0.76rem;
+    color: #3d4a5c;
+    line-height: 1.5;
 }
 .ledger-type {
-    font-weight: 600; font-size: 0.68rem; letter-spacing: 0.6px;
-    text-transform: uppercase; color: #f87171; margin-right: 8px;
-    padding: 1px 6px; background: rgba(239,68,68,0.1);
-    border-radius: 4px;
+    display: inline-block;
+    font-weight: 600;
+    font-size: 0.6rem;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: #ef4444;
+    margin-right: 8px;
+    padding: 1px 6px;
+    background: rgba(239,68,68,0.08);
+    border: 1px solid rgba(239,68,68,0.15);
+    border-radius: 3px;
+    vertical-align: middle;
 }
 
-/* ── 循环徽章 ── */
+/* ── Loop badge ── */
 .loop-badge {
-    display: inline-block; padding: 3px 12px;
-    border-radius: 20px; font-size: 0.75rem; font-weight: 600;
-    background: linear-gradient(135deg, #0f1428, #13192e);
-    color: #818cf8; border: 1px solid rgba(99,102,241,0.25);
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 3px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    color: #6366f1;
+    background: rgba(99,102,241,0.08);
+    border: 1px solid rgba(99,102,241,0.2);
 }
 
 </style>
@@ -315,20 +459,19 @@ _init_state()
 # 辅助渲染函数
 # ──────────────────────────────────────────────
 def render_header():
-    st.markdown("""
+    is_running = st.session_state.get("running", False)
+    if is_running:
+        right_html = '<span class="live-badge"><span class="live-dot"></span>LIVE</span>'
+    else:
+        right_html = '<span class="static-badge">IDLE</span>'
+    st.markdown(f"""
     <div class="app-header">
         <div class="app-header-inner">
-            <div class="app-header-logo">🧬</div>
-            <div>
-                <h1>Darwinian</h1>
-                <div class="subtitle">State-Driven Multi-Agent Automated Research System</div>
-                <div class="badge-row">
-                    <span class="hbadge">LangGraph</span>
-                    <span class="hbadge">7 Agents</span>
-                    <span class="hbadge">Adversarial Testing</span>
-                    <span class="hbadge">Auto-Publish Eval</span>
-                </div>
+            <div class="app-header-left">
+                <span class="app-header-wordmark">Darwinian</span>
+                <span class="app-header-sub">Intelligence</span>
             </div>
+            {right_html}
         </div>
     </div>
     """, unsafe_allow_html=True)
@@ -401,26 +544,21 @@ def _render_agent_detail(agent_id: str) -> str:
 def render_agent_card(agent_id: str, icon: str, name: str, desc: str):
     status = st.session_state.agent_status.get(agent_id, "pending")
     if status == "running":
-        status_html = '<span class="pulse-dot"></span>'
+        pill_html = '<span class="agent-status-pill pill-running"><span class="pulse-dot"></span>RUNNING</span>'
     elif status == "done":
-        status_html = '<span style="color:#34d399;font-size:0.75rem">✓ 完成</span>'
+        pill_html = '<span class="agent-status-pill pill-done">DONE</span>'
     elif status == "error":
-        status_html = '<span style="color:#f87171;font-size:0.75rem">✗ 出错</span>'
+        pill_html = '<span class="agent-status-pill pill-error">ERROR</span>'
     else:
-        status_html = ""
+        pill_html = '<span class="agent-status-pill pill-queued">QUEUED</span>'
     detail_html = _render_agent_detail(agent_id) if status == "done" else ""
 
     st.markdown(f"""
     <div class="agent-card {status}">
-        <div class="agent-icon">{icon}</div>
-        <div style="flex:1;min-width:0;padding-right:14px">
-            <div class="agent-status-row">
-                <span class="agent-name">{name}</span>
-                {status_html}
-            </div>
-            <div class="agent-desc">{desc}</div>
-            {detail_html}
-        </div>
+        {pill_html}
+        <div class="agent-headline">{icon}&nbsp;&nbsp;{name}</div>
+        <div class="agent-excerpt">{desc}</div>
+        {detail_html}
     </div>
     """, unsafe_allow_html=True)
 
@@ -428,60 +566,81 @@ def render_agent_card(agent_id: str, icon: str, name: str, desc: str):
 def render_publish_matrix():
     m = st.session_state.publish_matrix
     items = [
-        ("新颖性",   m["novelty"],   "💎", "Novelty"),
-        ("基准提升", m["baseline"],  "📈", "Baseline"),
-        ("鲁棒性",   m["robustness"],"🛡️", "Robustness"),
-        ("可解释性", m["explain"],   "📖", "Explainability"),
+        ("Novelty",        m["novelty"],    "💎"),
+        ("Baseline",       m["baseline"],   "📈"),
+        ("Robustness",     m["robustness"], "🛡️"),
+        ("Explainability", m["explain"],    "📖"),
     ]
     html = '<div class="publish-matrix">'
-    for label, passed, icon, _ in items:
+    for label, passed, icon in items:
         css = "green" if passed else "grey"
-        status = '<span style="color:#34d399;font-size:0.7rem;font-weight:600">PASSED</span>' if passed else '<span style="color:#1e2330;font-size:0.7rem">PENDING</span>'
-        html += (f'<div class="matrix-item {css}">'
-                 f'<span class="matrix-icon">{icon}</span>'
-                 f'<div class="matrix-label">{label}</div>'
-                 f'<div class="matrix-status">{status}</div>'
-                 f'</div>')
+        status_span = (
+            f'<span class="matrix-pass">PASS</span>'
+            if passed else
+            f'<span class="matrix-pending">PENDING</span>'
+        )
+        html += (
+            f'<div class="matrix-item {css}">'
+            f'<span class="matrix-icon">{icon}</span>'
+            f'<span class="matrix-label">{label}</span>'
+            f'{status_span}'
+            f'</div>'
+        )
     html += "</div>"
     st.markdown(html, unsafe_allow_html=True)
 
 
 def render_failed_ledger():
+    import html as _html_mod
     ledger = st.session_state.failed_ledger
     if not ledger:
-        st.caption("暂无失败记录")
+        st.markdown(
+            '<span style="font-size:0.72rem;color:#3d4a5c;letter-spacing:0.5px;">No failures recorded.</span>',
+            unsafe_allow_html=True,
+        )
         return
     for rec in ledger[-5:]:  # 只显示最近 5 条
+        ftype   = _html_mod.escape(str(rec.get("failure_type", "?")))
+        summary = _html_mod.escape(str(rec.get("error_summary", "")))
+        itr     = _html_mod.escape(str(rec.get("iteration", "?")))
         st.markdown(
             f'<div class="ledger-item">'
-            f'<span class="ledger-type">[{rec.get("failure_type","?")}]</span>'
-            f'第 {rec.get("iteration","?")} 轮 — {rec.get("error_summary","")}'
+            f'<span class="ledger-type">{ftype}</span>'
+            f'<span style="color:#3d4a5c;font-size:0.68rem;margin-right:8px;">iter&nbsp;{itr}</span>'
+            f'<span style="color:#4a5568;">{summary}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
 
 
 def render_log_console():
+    import html as _html_mod
     logs = st.session_state.logs
-    level_color = {"info": "#475569", "ok": "#34d399", "warn": "#fbbf24", "error": "#f87171"}
-    level_prefix = {"info": "·", "ok": "✓", "warn": "!", "error": "✗"}
+    level_color = {
+        "info":  "#3d4a5c",
+        "ok":    "#10b981",
+        "warn":  "#d97706",
+        "error": "#ef4444",
+    }
+    level_prefix = {"info": "·", "ok": "·", "warn": "!", "error": "✗"}
     lines = []
     for ts, level, msg in logs[-80:]:
-        color  = level_color.get(level, "#475569")
+        color  = level_color.get(level, "#3d4a5c")
         prefix = level_prefix.get(level, "·")
+        safe_msg = _html_mod.escape(str(msg))
         lines.append(
-            f'<span style="color:#1e293b;user-select:none">{ts}</span> '
-            f'<span style="color:{color};margin-right:6px">{prefix}</span>'
-            f'<span style="color:{color if level != "info" else "#475569"}">{msg}</span>'
+            f'<span style="color:#1e2a38;user-select:none">{ts}</span>'
+            f'&nbsp;<span style="color:{color}">{prefix}</span>'
+            f'&nbsp;<span style="color:{color}">{safe_msg}</span>'
         )
-    body = "<br>".join(lines) if lines else '<span style="color:#1e293b">waiting for execution...</span>'
+    body = "<br>".join(lines) if lines else '<span style="color:#1e2a38">waiting for execution...</span>'
     html = (
         '<div class="log-console">'
         '<div class="log-console-header">'
-        '<div class="log-dot" style="background:#ef4444"></div>'
-        '<div class="log-dot" style="background:#f59e0b"></div>'
-        '<div class="log-dot" style="background:#10b981"></div>'
-        '<span style="font-size:0.68rem;color:#334155;margin-left:6px;font-family:monospace">runtime.log</span>'
+        '<div class="log-dot" style="background:#2a1f1f"></div>'
+        '<div class="log-dot" style="background:#1f2217"></div>'
+        '<div class="log-dot" style="background:#0e1a15"></div>'
+        '<span class="log-console-filename">runtime.log</span>'
         '</div>'
         f'<div class="log-console-body">{body}</div>'
         '</div>'
@@ -490,30 +649,42 @@ def render_log_console():
 
 
 def render_metrics_table():
+    import html as _html_mod
     base = st.session_state.baseline_metrics
     prop = st.session_state.proposed_metrics
     pois = st.session_state.poison_metrics
     if not base and not prop:
-        st.caption("等待实验结果...")
+        st.markdown(
+            '<span style="font-size:0.72rem;color:#3d4a5c;">Awaiting experiment results...</span>',
+            unsafe_allow_html=True,
+        )
         return
 
     all_keys = sorted(set(list(base.keys()) + list(prop.keys())))
     rows = ""
     for key in all_keys:
-        b_val = base.get(key)
-        p_val = prop.get(key)
+        b_val   = base.get(key)
+        p_val   = prop.get(key)
         poi_val = pois.get(key)
-        b_str = f"{b_val:.4f}" if b_val is not None else "—"
-        p_css = ""
+        b_str   = f"{b_val:.4f}" if b_val is not None else "—"
+        p_css   = ""
         if p_val is not None and b_val is not None:
             p_css = "better" if p_val > b_val else "worse"
-        p_str = f"{p_val:.4f}" if p_val is not None else "—"
+        p_str   = f"{p_val:.4f}" if p_val is not None else "—"
         poi_str = f"{poi_val:.4f}" if poi_val is not None else "—"
-        rows += f'<tr><td>{key}</td><td>{b_str}</td><td class="{p_css}">{p_str}</td><td>{poi_str}</td></tr>'
+        safe_key = _html_mod.escape(str(key))
+        rows += (
+            f'<tr>'
+            f'<td>{safe_key}</td>'
+            f'<td>{b_str}</td>'
+            f'<td class="{p_css}">{p_str}</td>'
+            f'<td>{poi_str}</td>'
+            f'</tr>'
+        )
 
     st.markdown(f"""
     <table class="metrics-table">
-        <thead><tr><th>指标</th><th>Baseline</th><th>Proposed</th><th>毒药数据</th></tr></thead>
+        <thead><tr><th>Metric</th><th>Baseline</th><th>Proposed</th><th>Poison</th></tr></thead>
         <tbody>{rows}</tbody>
     </table>
     """, unsafe_allow_html=True)
@@ -990,7 +1161,9 @@ if st.session_state.running:
 col_left, col_right = st.columns([1, 1], gap="large")
 
 def _section(title: str):
-    st.markdown(f'<div class="section-title">{title}</div>', unsafe_allow_html=True)
+    import html as _html_mod
+    safe_title = _html_mod.escape(str(title)).upper()
+    st.markdown(f'<div class="section-title">{safe_title}</div>', unsafe_allow_html=True)
 
 def _stream_block(stream_text: str):
     import re as _re
