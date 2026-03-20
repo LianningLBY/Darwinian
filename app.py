@@ -293,6 +293,16 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
                model: str, provider: str, max_loops: int, q: queue.Queue):
     """在独立线程中运行 LangGraph，通过 queue 向主线程传递状态更新。"""
     try:
+        try:
+            import pydantic_core  # noqa: F401
+        except ModuleNotFoundError:
+            q.put(("error",
+                "缺少 pydantic-core，请在终端运行：\n"
+                "  pip install pydantic-core\n"
+                "安装后重启 Streamlit 即可。"
+            ))
+            return
+
         if provider == "Anthropic":
             os.environ["ANTHROPIC_API_KEY"] = api_key
             from langchain_anthropic import ChatAnthropic
