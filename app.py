@@ -756,7 +756,6 @@ def _make_queue_callback(q: queue.Queue):
             self._buf = []
             self._buf_len = 0
             self._q.put(("stream_start", None))
-            self._q.put(("log", ("info", "  ⌛ LLM 开始推理（等待模型响应）...")))
 
         def on_llm_new_token(self, token: str, **kwargs):
             self._buf.append(token)
@@ -1233,7 +1232,7 @@ if st.session_state.running:
             st.session_state._stream_agent      = running_name
             st.session_state._stream_agent_task = task_desc
             st.session_state.current_stream     = ""
-            _add_log("info", f"  → {task_desc}")
+            _add_log("info", f"  ⌛ {task_desc}")
         elif msg_type == "stream_chunk":
             st.session_state.current_stream += payload
         elif msg_type == "stream_end":
