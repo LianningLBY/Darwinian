@@ -78,57 +78,57 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 }
 .app-header-left { display: flex; flex-direction: column; gap: 2px; }
 .app-header-wordmark {
-    font-size: 0.7rem;
+    font-size: 0.95rem;
     font-weight: 700;
     letter-spacing: 3px;
     text-transform: uppercase;
     color: #dde1ea;
 }
 .app-header-sub {
-    font-size: 0.65rem;
+    font-size: 0.78rem;
     letter-spacing: 2px;
     text-transform: uppercase;
-    color: #5a6a80;
+    color: #7a8a9e;
     font-weight: 400;
 }
 .live-badge {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    font-size: 0.63rem;
+    font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 1.5px;
     text-transform: uppercase;
     color: #6366f1;
     border: 1px solid rgba(99,102,241,0.3);
     border-radius: 3px;
-    padding: 3px 9px;
+    padding: 4px 11px;
     background: rgba(99,102,241,0.06);
 }
 .live-badge .live-dot {
-    width: 5px; height: 5px; border-radius: 50%;
+    width: 6px; height: 6px; border-radius: 50%;
     background: #6366f1;
     animation: pulsedot 1.6s ease-in-out infinite;
 }
 .static-badge {
-    font-size: 0.63rem;
+    font-size: 0.75rem;
     font-weight: 500;
     letter-spacing: 1.5px;
     text-transform: uppercase;
-    color: #5a6a7e;
+    color: #6b7a8d;
     border: 1px solid #1e2a38;
     border-radius: 3px;
-    padding: 3px 9px;
+    padding: 4px 11px;
 }
 
 /* ── Section titles ── */
 .section-title {
-    font-size: 0.62rem;
+    font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 2px;
     text-transform: uppercase;
-    color: #5a6a7e;
-    margin: 22px 0 10px;
+    color: #7a8a9e;
+    margin: 24px 0 12px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -145,7 +145,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     position: relative;
     padding: 14px 16px;
     border-radius: 6px;
-    margin-bottom: 5px;
+    margin-bottom: 6px;
     background: #0b0e15;
     border: 1px solid #131929;
     border-left: 2px solid #131929;
@@ -165,49 +165,49 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     border-color: #1f1316;
 }
 .agent-card.pending {
-    opacity: 0.3;
+    opacity: 0.5;
 }
 
 /* Status pill — top right corner */
 .agent-status-pill {
     position: absolute;
-    top: 10px;
+    top: 11px;
     right: 12px;
-    font-size: 0.58rem;
+    font-size: 0.7rem;
     font-weight: 700;
-    letter-spacing: 1.2px;
+    letter-spacing: 1px;
     text-transform: uppercase;
-    padding: 2px 7px;
+    padding: 3px 9px;
     border-radius: 3px;
     display: inline-flex;
     align-items: center;
     gap: 4px;
 }
-.pill-queued  { color: #5a6a7e; background: transparent; border: 1px solid #1e2a38; }
+.pill-queued  { color: #6b7a8d; background: transparent; border: 1px solid #2a3a50; }
 .pill-running { color: #818cf8; background: rgba(99,102,241,0.08); border: 1px solid rgba(99,102,241,0.2); }
 .pill-done    { color: #10b981; background: rgba(16,185,129,0.07); border: 1px solid rgba(16,185,129,0.2); }
 .pill-error   { color: #ef4444; background: rgba(239,68,68,0.07);  border: 1px solid rgba(239,68,68,0.2); }
 
 /* Agent card body */
 .agent-headline {
-    font-size: 0.85rem;
+    font-size: 1rem;
     font-weight: 600;
     color: #dde1ea;
-    margin-bottom: 3px;
-    padding-right: 80px;
+    margin-bottom: 4px;
+    padding-right: 90px;
     letter-spacing: 0.1px;
 }
 .agent-card.running .agent-headline { color: #a5b4fc; }
 .agent-card.done    .agent-headline { color: #6ee7b7; }
 .agent-excerpt {
-    font-size: 0.73rem;
-    color: #6b7a8d;
-    line-height: 1.45;
+    font-size: 0.85rem;
+    color: #7a8a9e;
+    line-height: 1.5;
 }
 
 /* running pulse */
 .pulse-dot {
-    width: 5px; height: 5px; border-radius: 50%;
+    width: 6px; height: 6px; border-radius: 50%;
     background: #6366f1;
     display: inline-block;
     animation: pulsedot 1.4s ease-in-out infinite;
@@ -224,47 +224,47 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     background: #07090d;
     border-radius: 5px;
     border: 1px solid #131929;
-    font-size: 0.77rem;
+    font-size: 0.88rem;
 }
 .ad-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
 .ad-label {
-    color: #5a6a7e;
+    color: #6b7a8d;
     white-space: nowrap;
-    min-width: 60px;
-    font-size: 0.65rem;
+    min-width: 64px;
+    font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 0.8px;
     padding-top: 2px;
     font-weight: 500;
 }
-.ad-value { color: #8a9ab0; line-height: 1.5; }
+.ad-value { color: #9aaabf; line-height: 1.5; font-size: 0.88rem; }
 .ad-badge {
-    padding: 2px 8px;
+    padding: 3px 9px;
     border-radius: 3px;
-    font-size: 0.68rem;
+    font-size: 0.78rem;
     font-weight: 600;
     letter-spacing: 0.5px;
 }
 .ad-pass { background: rgba(16,185,129,0.10); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
 .ad-fail { background: rgba(239,68,68,0.08);  color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
 .ad-warn { background: rgba(217,119,6,0.08);  color: #d97706; border: 1px solid rgba(217,119,6,0.2); }
-.ad-feedback { color: #6b7a8d; margin-top: 5px; line-height: 1.6; font-size: 0.75rem; }
+.ad-feedback { color: #7a8a9e; margin-top: 5px; line-height: 1.6; font-size: 0.86rem; }
 .ad-ev {
-    color: #6b7a8d;
+    color: #7a8a9e;
     margin-bottom: 3px;
     padding-left: 10px;
-    border-left: 2px solid #131929;
-    font-size: 0.73rem;
+    border-left: 2px solid #1e2a38;
+    font-size: 0.85rem;
 }
 .ad-hyp {
     margin-bottom: 6px;
-    padding: 7px 10px;
+    padding: 8px 10px;
     background: #0b0e15;
     border-radius: 4px;
     border: 1px solid #131929;
 }
-.ad-hyp-name { font-weight: 600; color: #6366f1; display: block; margin-bottom: 2px; font-size: 0.75rem; }
-.ad-hyp-desc { color: #6b7a8d; font-size: 0.72rem; line-height: 1.5; }
+.ad-hyp-name { font-weight: 600; color: #818cf8; display: block; margin-bottom: 2px; font-size: 0.88rem; }
+.ad-hyp-desc { color: #7a8a9e; font-size: 0.84rem; line-height: 1.5; }
 
 /* ── Publish matrix ── */
 .publish-matrix {
@@ -278,7 +278,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 }
 .matrix-item {
     flex: 1;
-    padding: 14px 10px;
+    padding: 16px 10px;
     text-align: center;
     background: #0b0e15;
     border-right: 1px solid #131929;
@@ -286,24 +286,24 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 }
 .matrix-item:last-child { border-right: none; }
 .matrix-item.green { background: #080f0d; }
-.matrix-item.grey  { opacity: 0.4; }
+.matrix-item.grey  { opacity: 0.5; }
 .matrix-icon {
-    font-size: 1.2rem;
+    font-size: 1.3rem;
     display: block;
-    margin-bottom: 6px;
+    margin-bottom: 7px;
     line-height: 1;
 }
 .matrix-label {
-    font-size: 0.62rem;
+    font-size: 0.75rem;
     font-weight: 600;
     letter-spacing: 0.8px;
     text-transform: uppercase;
-    color: #5a6a7e;
-    margin-bottom: 5px;
+    color: #7a8a9e;
+    margin-bottom: 6px;
     display: block;
 }
-.matrix-pass   { font-size: 0.65rem; font-weight: 700; letter-spacing: 0.8px; color: #10b981; text-transform: uppercase; }
-.matrix-pending { font-size: 0.65rem; font-weight: 500; letter-spacing: 0.8px; color: #5a6a7e; text-transform: uppercase; }
+.matrix-pass   { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.8px; color: #10b981; text-transform: uppercase; }
+.matrix-pending { font-size: 0.75rem; font-weight: 500; letter-spacing: 0.8px; color: #6b7a8d; text-transform: uppercase; }
 
 /* ── Log console ── */
 .log-console {
@@ -320,21 +320,21 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     align-items: center;
     gap: 6px;
 }
-.log-dot { width: 7px; height: 7px; border-radius: 50%; }
+.log-dot { width: 8px; height: 8px; border-radius: 50%; }
 .log-console-filename {
-    font-size: 0.62rem;
-    color: #5a6a7e;
+    font-size: 0.75rem;
+    color: #6b7a8d;
     margin-left: 8px;
     font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
     letter-spacing: 0.5px;
 }
 .log-console-body {
     padding: 10px 14px;
-    height: 200px;
+    height: 240px;
     overflow-y: auto;
     font-family: 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
-    font-size: 0.72rem;
-    line-height: 1.7;
+    font-size: 0.83rem;
+    line-height: 1.75;
     background: #030407;
 }
 
@@ -342,29 +342,29 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 .metrics-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.79rem;
+    font-size: 0.9rem;
 }
 .metrics-table thead tr { background: #07090d; }
 .metrics-table th {
     text-align: left;
-    padding: 8px 12px;
+    padding: 9px 12px;
     border-bottom: 1px solid #131929;
-    color: #5a6a7e;
+    color: #6b7a8d;
     font-weight: 500;
-    font-size: 0.62rem;
+    font-size: 0.75rem;
     text-transform: uppercase;
     letter-spacing: 1px;
 }
 .metrics-table td {
-    padding: 8px 12px;
+    padding: 9px 12px;
     border-bottom: 1px solid #0e1118;
-    color: #6b7a8d;
+    color: #7a8a9e;
 }
 .metrics-table tbody tr:nth-child(even) td { background: #09090e; }
 .metrics-table tbody tr:hover td { background: #0c0e16; }
 .metrics-table .better { color: #10b981; font-weight: 600; }
 .metrics-table .worse  { color: #ef4444; }
-.metrics-table td:first-child { color: #8a9ab0; font-weight: 500; }
+.metrics-table td:first-child { color: #9aaabf; font-weight: 500; }
 
 /* ── Failed ledger ── */
 .ledger-item {
@@ -374,19 +374,19 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     border-left: 2px solid #ef4444;
     background: #0b0e15;
     margin-bottom: 5px;
-    font-size: 0.76rem;
-    color: #6b7a8d;
+    font-size: 0.88rem;
+    color: #7a8a9e;
     line-height: 1.5;
 }
 .ledger-type {
     display: inline-block;
     font-weight: 600;
-    font-size: 0.6rem;
+    font-size: 0.72rem;
     letter-spacing: 1px;
     text-transform: uppercase;
     color: #ef4444;
     margin-right: 8px;
-    padding: 1px 6px;
+    padding: 2px 7px;
     background: rgba(239,68,68,0.08);
     border: 1px solid rgba(239,68,68,0.15);
     border-radius: 3px;
@@ -398,7 +398,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     display: inline-block;
     padding: 2px 10px;
     border-radius: 3px;
-    font-size: 0.72rem;
+    font-size: 0.85rem;
     font-weight: 600;
     letter-spacing: 0.5px;
     color: #6366f1;
@@ -1166,21 +1166,21 @@ def _section(title: str):
 def _stream_block(stream_text: str):
     import re as _re
     think_match = _re.search(r"<think>([\s\S]*?)</think>([\s\S]*)", stream_text)
-    base_style = ("font-size:0.77rem;white-space:pre-wrap;font-family:'JetBrains Mono','Fira Code',monospace;"
-                  "max-height:280px;overflow-y:auto;line-height:1.7;padding:12px 14px;"
+    base_style = ("font-size:0.85rem;white-space:pre-wrap;font-family:'JetBrains Mono','Fira Code',monospace;"
+                  "max-height:320px;overflow-y:auto;line-height:1.75;padding:14px 16px;"
                   "background:#06080f;border:1px solid #1a2035;border-radius:8px;")
     if think_match:
         think_part = think_match.group(1).strip()
         rest_part  = think_match.group(2).strip()
         with st.expander("🤔 Reasoning trace", expanded=False):
-            st.markdown(f'<div style="{base_style}color:#7a8a9e">{think_part}</div>',
+            st.markdown(f'<div style="{base_style}color:#8a9ab0">{think_part}</div>',
                         unsafe_allow_html=True)
         if rest_part:
-            st.markdown(f'<div style="{base_style}color:#8a9ab0">{rest_part}</div>',
+            st.markdown(f'<div style="{base_style}color:#9aaabf">{rest_part}</div>',
                         unsafe_allow_html=True)
     else:
         in_think = "<think>" in stream_text and "</think>" not in stream_text
-        color = "#475569" if in_think else "#8a9ab0"
+        color = "#7a8a9e" if in_think else "#9aaabf"
         if in_think:
             st.markdown('<span style="font-size:0.72rem;color:#5a6a7e">⟳ reasoning...</span>',
                         unsafe_allow_html=True)
