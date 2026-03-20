@@ -124,10 +124,16 @@ STDERR: {stderr_snippet}
 
     ctx = _make_context(hypothesis, branch, dataset_section, retry_context)
 
+    is_retry = state.experiment_code is not None and state.experiment_code.retry_count > 0
+
     # ── 第 1 次：dataset_loader_code ──
-    loader_code = _call_llm(
-        llm, system=_BASE_SYSTEM,
-        user=f"""{ctx}
+    # 重试时直接复用上一轮 loader（它不是出错原因），避免维度再次漂移
+    if is_retry and state.experiment_code and state.experiment_code.dataset_loader_code:
+        loader_code = state.experiment_code.dataset_loader_code
+    else:
+        loader_code = _call_llm(
+            llm, system=_BASE_SYSTEM,
+            user=f"""{ctx}
 
 任务：只编写「数据加载脚本」。
 要求：
@@ -135,12 +141,16 @@ STDERR: {stderr_snippet}
 - 必须暴露 load_data() 函数供其他脚本调用，返回 (X_train, X_test, y_train, y_test)
 - 最后 print 一行 JSON: {{"model": "loader", "metrics": {{"n_samples": ..., "n_features": ...}}}}
 不超过 60 行。只输出 Python 代码。""",
-    )
+        )
 
     # ── 第 2 次：baseline_code ──
-    baseline_code = _call_llm(
-        llm, system=_BASE_SYSTEM,
-        user=f"""{ctx}
+    # 重试时同样复用上一轮 baseline（维度来源与 loader 一致）
+    if is_retry and state.experiment_code and state.experiment_code.baseline_code:
+        baseline_code = state.experiment_code.baseline_code
+    else:
+        baseline_code = _call_llm(
+            llm, system=_BASE_SYSTEM,
+            user=f"""{ctx}
 
 任务：只编写「Baseline 基准方法代码」。
 要求：
@@ -149,16 +159,22 @@ STDERR: {stderr_snippet}
 - 计算每个指标的均值和标准差
 - 最后 print 一行 JSON: {{"model": "baseline", "metrics": {{"accuracy_mean": ..., "accuracy_std": ...}}}}
 不超过 150 行。只输出 Python 代码。""",
-    )
+        )
 
     # ── 第 3 次：proposed_code ──
+    # 始终将 loader_code 传入，让 LLM 能看到实际 n_features，杜绝维度猜测
     proposed_code = _call_llm(
         llm, system=_BASE_SYSTEM,
         user=f"""{ctx}
 
+以下是本次实验的 dataset_loader.py（必须与此保持维度一致）：
+```python
+{loader_code[:600]}
+```
+
 任务：只编写「Proposed Method 实验代码」（{branch.name}）。
 要求：
-- 实现假设中的方案
+- 实现假设中的方案，输入维度必须与 load_data() 返回的 X_train.shape[1] 一致
 - 在 SEEDS = [42, 123, 456] 三个种子下各训练一次
 - 计算每个指标的均值和标准差
 - 最后 print 一行 JSON: {{"model": "proposed", "metrics": {{"accuracy_mean": ..., "accuracy_std": ...}}}}
@@ -170,10 +186,15 @@ STDERR: {stderr_snippet}
         llm, system=_BASE_SYSTEM,
         user=f"""{ctx}
 
+以下是本次实验的 dataset_loader.py（维度来源）：
+```python
+{loader_code[:400]}
+```
+
 任务：只编写「消融实验代码」（Ablation Study）。
 要求：
 - 识别方案 {branch.name} 的 2-3 个关键组件
-- 每个变体去掉一个组件，其余保持不变
+- 每个变体去掉一个组件，其余保持不变，输入维度与 loader 一致
 - 每个变体用 SEED=42 跑一次，输出结果
 - 每个变体 print 一行 JSON: {{"model": "ablation_no_<组件名>", "metrics": {{...}}}}
 - 最后 print {{"model": "ablation_summary", "metrics": {{"n_variants": ...}}}}
