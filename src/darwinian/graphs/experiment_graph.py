@@ -38,6 +38,7 @@ from darwinian.agents.diagnostician import diagnostician_node
 from darwinian.agents.poison_generator import poison_generator_node
 from darwinian.agents.publish_evaluator import publish_evaluator_node
 from darwinian.tools.code_executor import code_execute
+from darwinian.tools.dataset_finder import dataset_finder_node
 from darwinian.utils.similarity import get_text_embedding
 
 
@@ -49,15 +50,9 @@ MAX_CODE_RETRIES = 5  # 内层代码修复循环上限
 # ---------------------------------------------------------------------------
 
 def dataset_router_node(state: ResearchState) -> dict:
-    """确认数据集 Schema 已就绪。如未提供则使用默认占位 Schema。"""
+    """确认数据集 Schema 已就绪。若没有用户提供的 Schema，填入占位符供后续节点参考。"""
     if not state.dataset_schema:
-        default_schema = {
-            "type": "tabular",
-            "n_features": "unknown",
-            "n_classes": "unknown",
-            "note": "请在 ResearchState.dataset_schema 中提供实际数据集描述",
-        }
-        return {"dataset_schema": default_schema}
+        return {"dataset_schema": {"type": "unknown", "note": "由 dataset_finder 自动确定"}}
     return {}
 
 
@@ -66,7 +61,11 @@ def code_execute_node(state: ResearchState) -> dict:
     if state.experiment_code is None:
         raise ValueError("code_execute_node 调用前必须先运行 code_architect_node")
 
-    result = code_execute(experiment_code=state.experiment_code, mode="full")
+    result = code_execute(
+        experiment_code=state.experiment_code,
+        mode="full",
+        data_dir=state.user_data_path or None,
+    )
     return {"experiment_result": result}
 
 
@@ -75,7 +74,11 @@ def poison_execute_node(state: ResearchState) -> dict:
     if state.experiment_code is None:
         raise ValueError("poison_execute_node 调用前必须先运行 poison_generator_node")
 
-    result = code_execute(experiment_code=state.experiment_code, mode="poison")
+    result = code_execute(
+        experiment_code=state.experiment_code,
+        mode="poison",
+        data_dir=state.user_data_path or None,
+    )
 
     # 解析扰动后指标，写入 poison_test_result
     if state.poison_test_result is not None:
@@ -194,6 +197,7 @@ def build_experiment_graph(llm: BaseChatModel) -> StateGraph:
 
     # 注册节点
     graph.add_node("dataset_router", dataset_router_node)
+    graph.add_node("dataset_finder", partial(dataset_finder_node, llm=llm))
     graph.add_node("code_architect", partial(code_architect_node, llm=llm))
     graph.add_node("code_execute", code_execute_node)
     graph.add_node("diagnostician", partial(diagnostician_node, llm=llm))
@@ -205,7 +209,8 @@ def build_experiment_graph(llm: BaseChatModel) -> StateGraph:
 
     # 固定边
     graph.add_edge(START, "dataset_router")
-    graph.add_edge("dataset_router", "code_architect")
+    graph.add_edge("dataset_router", "dataset_finder")
+    graph.add_edge("dataset_finder", "code_architect")
     graph.add_edge("code_architect", "code_execute")
     graph.add_edge("code_execute", "diagnostician")
     graph.add_edge("write_insufficient", END)

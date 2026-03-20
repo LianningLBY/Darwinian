@@ -774,7 +774,8 @@ def _make_queue_callback(q: queue.Queue):
 # 运行逻辑（在后台线程中执行图）
 # ──────────────────────────────────────────────
 def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
-               model: str, provider: str, max_loops: int, q: queue.Queue):
+               model: str, provider: str, max_loops: int, q: queue.Queue,
+               user_data_path: str = ""):
     """在独立线程中运行 LangGraph，通过 queue 向主线程传递状态更新。"""
     try:
         # 检查所有必要依赖
@@ -837,10 +838,13 @@ def _run_graph(research_direction: str, dataset_schema: dict, api_key: str,
         from darwinian.graphs.main_graph import build_main_graph
 
         graph = build_main_graph(llm)
+        if user_data_path:
+            q.put(("log", ("info", f"用户数据集: {user_data_path}")))
         initial_state = ResearchState(
             research_direction=research_direction,
             dataset_schema=dataset_schema,
             max_outer_loops=max_loops,
+            user_data_path=user_data_path,
         )
 
         q.put(("log", ("ok", "图构建完成，开始执行...")))
@@ -1021,13 +1025,38 @@ with st.sidebar:
         placeholder="描述你想探索的研究方向...",
     )
 
-    with st.expander("数据集描述（可选）", expanded=False):
-        st.caption("留空则由 Agent 4 根据假设自动选择合适的公开数据集")
+    with st.expander("📂 数据集（可选）", expanded=False):
+        st.caption("不填则系统自动搜索 HuggingFace 公开数据集")
+
+        uploaded_file = st.file_uploader(
+            "上传数据集",
+            type=["csv", "parquet", "npz", "npy", "json", "jsonl"],
+            help="支持 CSV / Parquet / NumPy / JSON 格式",
+        )
+
+        # 保存上传文件到临时目录，持久化路径到 session_state
+        if uploaded_file is not None:
+            import tempfile, pathlib
+            upload_dir = pathlib.Path(tempfile.gettempdir()) / "darwinian_uploads"
+            upload_dir.mkdir(exist_ok=True)
+            save_path = upload_dir / uploaded_file.name
+            save_path.write_bytes(uploaded_file.getvalue())
+            st.session_state["_upload_path"] = str(save_path)
+            st.success(f"已上传：{uploaded_file.name}", icon="✅")
+        elif "_upload_path" not in st.session_state:
+            st.session_state["_upload_path"] = ""
+
+        if st.session_state.get("_upload_path"):
+            if st.button("✕ 清除上传文件", use_container_width=False):
+                st.session_state["_upload_path"] = ""
+                st.rerun()
+
+        st.caption("或填写数据集描述辅助搜索：")
         dataset_schema_str = st.text_area(
             "dataset_schema",
             value="",
-            height=120,
-            placeholder='{"type": "tabular", "task": "classification", "metric": "ROC-AUC"}',
+            height=80,
+            placeholder='{"task": "classification", "domain": "molecular", "metric": "ROC-AUC"}',
             label_visibility="collapsed",
         )
 
@@ -1093,10 +1122,14 @@ with st.sidebar:
         except Exception:
             ds = {}
 
+        user_data_path = st.session_state.get("_upload_path", "")
+
         # 启动后台线程
         t = threading.Thread(
             target=_run_graph,
-            args=(research_direction, ds, api_key, model_choice, provider_choice, max_loops, st.session_state.log_queue),
+            args=(research_direction, ds, api_key, model_choice, provider_choice,
+                  max_loops, st.session_state.log_queue),
+            kwargs={"user_data_path": user_data_path},
             daemon=True,
         )
         t.start()

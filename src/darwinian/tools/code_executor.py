@@ -92,7 +92,6 @@ def code_execute(
                 volumes={tmpdir: {"bind": "/workspace", "mode": "ro"}, **volumes},
                 mem_limit=MEM_LIMIT,
                 cpu_quota=CPU_QUOTA,
-                network_mode="none",
                 remove=True,
                 stdout=True,
                 stderr=True,

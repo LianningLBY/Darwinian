@@ -145,6 +145,15 @@ class PublishMatrix(BaseModel):
 # 全局状态
 # ---------------------------------------------------------------------------
 
+class DatasetInfo(BaseModel):
+    """数据集选择结果"""
+    source: str = Field(description="来源: 'huggingface' | 'user_upload' | 'builtin'")
+    dataset_id: str = Field(description="HuggingFace dataset ID 或用户上传的文件名")
+    description: str = Field(default="", description="数据集描述")
+    task_type: str = Field(default="", description="任务类型: classification / regression / etc.")
+    load_instruction: str = Field(default="", description="加载代码示例")
+
+
 class ResearchState(BaseModel):
     """
     Darwinian 系统的全局状态。
@@ -153,7 +162,11 @@ class ResearchState(BaseModel):
 
     # 研究方向输入
     research_direction: str = Field(default="", description="用户输入的研究方向描述")
-    dataset_schema: dict[str, Any] = Field(default_factory=dict, description="实验数据集 Schema")
+    dataset_schema: dict[str, Any] = Field(default_factory=dict, description="实验数据集 Schema（可选，用户填写）")
+
+    # 数据集选择结果（由 dataset_finder_node 填充）
+    selected_dataset: DatasetInfo | None = Field(default=None, description="自动搜索或用户上传的数据集信息")
+    user_data_path: str = Field(default="", description="用户上传数据集在宿主机上的路径（Docker 只读挂载）")
 
     # 预算追踪
     budget_state: BudgetState = Field(default_factory=BudgetState)
