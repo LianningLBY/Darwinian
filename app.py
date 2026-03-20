@@ -226,10 +226,10 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 .agent-card.done    .agent-headline { color: #6ee7b7; }
 .agent-excerpt {
     font-size: 0.85rem;
-    color: #7a8a9e;
+    color: #a0b0c8;
     line-height: 1.5;
 }
-.agent-card.running .agent-excerpt { color: #9aa5cc; }
+.agent-card.running .agent-excerpt { color: #b4c0e0; }
 
 /* running pulse */
 .pulse-dot {
@@ -255,7 +255,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 }
 .ad-row { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 6px; }
 .ad-label {
-    color: #6b7a8d;
+    color: #8a9ab0;
     white-space: nowrap;
     min-width: 64px;
     font-size: 0.75rem;
@@ -264,7 +264,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     padding-top: 2px;
     font-weight: 500;
 }
-.ad-value { color: #9aaabf; line-height: 1.5; font-size: 0.88rem; }
+.ad-value { color: #b8c8dc; line-height: 1.5; font-size: 0.88rem; }
 .ad-badge {
     padding: 3px 9px;
     border-radius: 3px;
@@ -275,9 +275,9 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 .ad-pass { background: rgba(16,185,129,0.10); color: #10b981; border: 1px solid rgba(16,185,129,0.2); }
 .ad-fail { background: rgba(239,68,68,0.08);  color: #ef4444; border: 1px solid rgba(239,68,68,0.2); }
 .ad-warn { background: rgba(217,119,6,0.08);  color: #d97706; border: 1px solid rgba(217,119,6,0.2); }
-.ad-feedback { color: #7a8a9e; margin-top: 5px; line-height: 1.6; font-size: 0.86rem; }
+.ad-feedback { color: #a0b0c8; margin-top: 5px; line-height: 1.6; font-size: 0.86rem; }
 .ad-ev {
-    color: #7a8a9e;
+    color: #a0b0c8;
     margin-bottom: 3px;
     padding-left: 10px;
     border-left: 2px solid #1e2a38;
@@ -291,7 +291,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     border: 1px solid #131929;
 }
 .ad-hyp-name { font-weight: 600; color: #818cf8; display: block; margin-bottom: 2px; font-size: 0.88rem; }
-.ad-hyp-desc { color: #7a8a9e; font-size: 0.84rem; line-height: 1.5; }
+.ad-hyp-desc { color: #a0b0c8; font-size: 0.84rem; line-height: 1.5; }
 
 /* ── Publish matrix ── */
 .publish-matrix {
@@ -325,12 +325,12 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     font-weight: 600;
     letter-spacing: 0.8px;
     text-transform: uppercase;
-    color: #7a8a9e;
+    color: #9aaabf;
     margin-bottom: 6px;
     display: block;
 }
 .matrix-pass   { font-size: 0.75rem; font-weight: 700; letter-spacing: 0.8px; color: #10b981; text-transform: uppercase; }
-.matrix-pending { font-size: 0.75rem; font-weight: 500; letter-spacing: 0.8px; color: #6b7a8d; text-transform: uppercase; }
+.matrix-pending { font-size: 0.75rem; font-weight: 500; letter-spacing: 0.8px; color: #8a9ab0; text-transform: uppercase; }
 
 /* ── Log console ── */
 .log-console {
@@ -385,13 +385,13 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
 .metrics-table td {
     padding: 9px 12px;
     border-bottom: 1px solid #0e1118;
-    color: #7a8a9e;
+    color: #a0b0c8;
 }
 .metrics-table tbody tr:nth-child(even) td { background: #09090e; }
 .metrics-table tbody tr:hover td { background: #0c0e16; }
 .metrics-table .better { color: #10b981; font-weight: 600; }
 .metrics-table .worse  { color: #ef4444; }
-.metrics-table td:first-child { color: #9aaabf; font-weight: 500; }
+.metrics-table td:first-child { color: #c0d0e4; font-weight: 500; }
 
 /* ── Failed ledger ── */
 .ledger-item {
@@ -402,7 +402,7 @@ section[data-testid="stSidebar"] .block-container { padding-top: 1.5rem; }
     background: #0b0e15;
     margin-bottom: 5px;
     font-size: 0.88rem;
-    color: #7a8a9e;
+    color: #a0b0c8;
     line-height: 1.5;
 }
 .ledger-type {
@@ -635,8 +635,8 @@ def render_failed_ledger():
         st.markdown(
             f'<div class="ledger-item">'
             f'<span class="ledger-type">{ftype}</span>'
-            f'<span style="color:#5a6a7e;font-size:0.68rem;margin-right:8px;">iter&nbsp;{itr}</span>'
-            f'<span style="color:#7a8a9e;">{summary}</span>'
+            f'<span style="color:#8a9ab0;font-size:0.68rem;margin-right:8px;">iter&nbsp;{itr}</span>'
+            f'<span style="color:#a0b0c8;">{summary}</span>'
             f'</div>',
             unsafe_allow_html=True,
         )
@@ -646,7 +646,7 @@ def render_log_console():
     import html as _html_mod
     logs = st.session_state.logs
     level_color = {
-        "info":  "#6b7a8d",
+        "info":  "#8a9ab8",
         "ok":    "#10b981",
         "warn":  "#d97706",
         "error": "#ef4444",
@@ -654,11 +654,11 @@ def render_log_console():
     level_prefix = {"info": "·", "ok": "·", "warn": "!", "error": "✗"}
     lines = []
     for ts, level, msg in logs[-80:]:
-        color  = level_color.get(level, "#6b7a8d")
+        color  = level_color.get(level, "#8a9ab8")
         prefix = level_prefix.get(level, "·")
         safe_msg = _html_mod.escape(str(msg))
         lines.append(
-            f'<span style="color:#5a6a7e;user-select:none">{ts}</span>'
+            f'<span style="color:#7a8a9e;user-select:none">{ts}</span>'
             f'&nbsp;<span style="color:{color}">{prefix}</span>'
             f'&nbsp;<span style="color:{color}">{safe_msg}</span>'
         )
@@ -1260,14 +1260,14 @@ def _stream_block(stream_text: str):
         think_part = think_match.group(1).strip()
         rest_part  = think_match.group(2).strip()
         with st.expander("🤔 Reasoning trace", expanded=False):
-            st.markdown(f'<div style="{base_style}color:#8a9ab0">{think_part}</div>',
+            st.markdown(f'<div style="{base_style}color:#a0b0c8">{think_part}</div>',
                         unsafe_allow_html=True)
         if rest_part:
-            st.markdown(f'<div style="{base_style}color:#9aaabf">{rest_part}</div>',
+            st.markdown(f'<div style="{base_style}color:#b8c8dc">{rest_part}</div>',
                         unsafe_allow_html=True)
     else:
         in_think = "<think>" in stream_text and "</think>" not in stream_text
-        color = "#7a8a9e" if in_think else "#9aaabf"
+        color = "#a0b0c8" if in_think else "#b8c8dc"
         if in_think:
             st.markdown('<span style="font-size:0.72rem;color:#5a6a7e">⟳ reasoning...</span>',
                         unsafe_allow_html=True)
@@ -1302,7 +1302,7 @@ if stream_text or stream_history:
                 )
             if entry["response"]:
                 st.markdown(
-                    f'<div style="{box}color:#9aaabf;margin-top:8px">{entry["response"]}</div>',
+                    f'<div style="{box}color:#b8c8dc;margin-top:8px">{entry["response"]}</div>',
                     unsafe_allow_html=True,
                 )
 
