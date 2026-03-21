@@ -16,6 +16,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
 from darwinian.state import ResearchState, PublishMatrix, FinalVerdict
+from darwinian.utils.llm_retry import invoke_with_retry
 
 
 SYSTEM_PROMPT = """你是一个学术论文终审委员会，由三位独立审稿人组成：
@@ -97,7 +98,7 @@ def publish_evaluator_node(state: ResearchState, llm: BaseChatModel) -> dict:
 
 请由三位审稿人独立评审并给出终局裁决。"""
 
-    response = llm.invoke([
+    response = invoke_with_retry(llm, [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=user_message),
     ])

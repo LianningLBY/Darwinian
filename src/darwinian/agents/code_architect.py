@@ -20,6 +20,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
 from darwinian.state import ResearchState, ExperimentCode
+from darwinian.utils.llm_retry import invoke_with_retry
 
 
 _BASE_SYSTEM = """你是一个科研实验代码架构师。你的任务是编写可直接运行的 Python 实验代码。
@@ -60,7 +61,7 @@ def _make_context(hypothesis, branch, dataset_section: str, retry_context: str) 
 
 
 def _call_llm(llm: BaseChatModel, system: str, user: str) -> str:
-    response = llm.invoke([
+    response = invoke_with_retry(llm, [
         SystemMessage(content=system),
         HumanMessage(content=user),
     ])

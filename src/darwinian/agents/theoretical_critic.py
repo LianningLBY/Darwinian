@@ -16,6 +16,7 @@ from langchain_core.language_models import BaseChatModel
 
 import re as _re
 from darwinian.state import ResearchState, CriticVerdict, AbstractionBranch
+from darwinian.utils.llm_retry import invoke_with_retry
 
 # 元投诉特征：core_problem 描述系统/检索状态而非科研问题
 _META_COMPLAINT_PATTERNS = [
@@ -104,7 +105,7 @@ def theoretical_critic_node(state: ResearchState, llm: BaseChatModel) -> dict:
 
 请对上述方案进行严格审查。"""
 
-    response = llm.invoke([
+    response = invoke_with_retry(llm, [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=user_message),
     ])

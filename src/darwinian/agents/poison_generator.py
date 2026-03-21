@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
 from darwinian.state import ResearchState
+from darwinian.utils.llm_retry import invoke_with_retry
 from darwinian.tools.perturbation_strategies import (
     STRATEGY_REGISTRY,
     PerturbationStrategy,
@@ -74,7 +75,7 @@ def poison_generator_node(state: ResearchState, llm: BaseChatModel) -> dict:
 
 请分析该方法在哪些条件下最可能失效，选择最有针对性的扰动策略。"""
 
-    response = llm.invoke([
+    response = invoke_with_retry(llm, [
         SystemMessage(content=system_prompt),
         HumanMessage(content=user_message),
     ])

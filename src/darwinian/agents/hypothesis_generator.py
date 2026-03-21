@@ -17,6 +17,7 @@ from langchain_core.language_models import BaseChatModel
 import json as _json
 from darwinian.state import ResearchState, Hypothesis, AbstractionBranch
 from darwinian.utils.similarity import compute_cosine_similarity, get_text_embedding
+from darwinian.utils.llm_retry import invoke_with_retry
 
 
 SIMILARITY_THRESHOLD = 0.85
@@ -73,7 +74,7 @@ def hypothesis_generator_node(state: ResearchState, llm: BaseChatModel) -> dict:
 
 请生成跨域解决方案。"""
 
-    response = llm.invoke([
+    response = invoke_with_retry(llm, [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=user_message),
     ])

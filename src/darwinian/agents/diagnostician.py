@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.language_models import BaseChatModel
 
 from darwinian.state import ResearchState, ExecutionVerdict
+from darwinian.utils.llm_retry import invoke_with_retry
 
 
 SYSTEM_PROMPT = """你是一个科研实验诊断分析师。你的任务是分析代码执行日志，判断失败原因。
@@ -61,7 +62,7 @@ STDERR（前 2000 字符）：
 
 请诊断执行结果。"""
 
-    response = llm.invoke([
+    response = invoke_with_retry(llm, [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=user_message),
     ])

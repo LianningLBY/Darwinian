@@ -17,6 +17,7 @@ from langchain_core.language_models import BaseChatModel
 
 from darwinian.state import ResearchState
 from darwinian.tools.semantic_scholar import search_papers_with_limitations
+from darwinian.utils.llm_retry import invoke_with_retry
 
 
 SYSTEM_PROMPT = """你是一个科研瓶颈挖掘与文献分析专家。你的任务是：
@@ -74,7 +75,7 @@ def bottleneck_miner_node(state: ResearchState, llm: BaseChatModel) -> dict:
 
 请深入分析现有方法的共同局限，识别最值得攻克的核心矛盾。"""
 
-    response = llm.invoke([
+    response = invoke_with_retry(llm, [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=user_message),
     ])
