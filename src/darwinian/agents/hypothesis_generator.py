@@ -74,23 +74,38 @@ def hypothesis_generator_node(state: ResearchState, llm: BaseChatModel) -> dict:
 
 请生成跨域解决方案。"""
 
-    response = invoke_with_retry(llm, [
+    # 内层重试：LLM 输出截断或 JSON 解析失败时，直接重试 LLM，最多 3 次
+    import time
+    messages = [
         SystemMessage(content=SYSTEM_PROMPT),
         HumanMessage(content=user_message),
-    ])
+    ]
+    raw = None
+    branches = None
+    last_response = None
+    for attempt in range(3):
+        last_response = invoke_with_retry(llm, messages)
+        try:
+            raw = parse_llm_json(last_response.content)
+            branches = [AbstractionBranch(**b) for b in raw["abstraction_tree"]]
+            if branches:  # 成功解析到至少一个分支
+                break
+        except (_json.JSONDecodeError, KeyError, Exception):
+            pass
+        # 解析失败，等待后重试
+        print(f"[hypothesis_generator] 解析失败，{5 * (attempt + 1)}s 后重试（{attempt + 1}/3）...")
+        time.sleep(5 * (attempt + 1))
+        raw = None
+        branches = None
 
-    try:
-        raw = parse_llm_json(response.content)
-        branches = [AbstractionBranch(**b) for b in raw["abstraction_tree"]]
-    except (_json.JSONDecodeError, KeyError, Exception):
-        # LLM 输出截断（如只有 <think> 块）或结构缺失，返回空 abstraction_tree
-        # Agent 3 会捕获空树 → MATH_ERROR → 触发重试，不让整个 pipeline 崩溃
+    if not branches:
+        # 全部重试失败，返回空树触发 MATH_ERROR 路径
         return {
             "current_hypothesis": Hypothesis(
                 core_problem=state.current_hypothesis.core_problem,
                 abstraction_tree=[],
             ),
-            "messages": [response],
+            "messages": [last_response] if last_response else [],
         }
 
     new_hypothesis = Hypothesis(
@@ -105,7 +120,7 @@ def hypothesis_generator_node(state: ResearchState, llm: BaseChatModel) -> dict:
 
     return {
         "current_hypothesis": new_hypothesis,
-        "messages": [response],
+        "messages": [last_response],
     }
 
 
