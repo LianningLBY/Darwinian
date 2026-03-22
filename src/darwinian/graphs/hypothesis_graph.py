@@ -51,7 +51,8 @@ def preprocess_node(state: ResearchState) -> dict:
         "critic_verdict": None,
         "critic_feedback": "",
         "current_hypothesis": None,
-        "hypothesis_retry_count": 0,   # 重置内层重试计数
+        "hypothesis_retry_count": 0,   # 重置内层重试计数（NOT_NOVEL）
+        "miner_retry_count": 0,        # 重置 MATH_ERROR 重试计数
         # 重置实验代码/结果，避免 retry_count 跨外层循环累积
         # 不重置会导致：上轮 retry_count=5 → 新轮第一次 code_error 就被判为 INSUFFICIENT
         "experiment_code": None,
@@ -121,6 +122,9 @@ def critic_router(state: ResearchState) -> Literal["hypothesis_generator", "bott
             return "__end__"   # 内层耗尽，放弃本轮假设（selected_branch=None → phase1_router 终止）
         return "hypothesis_generator"
     elif verdict == CriticVerdict.MATH_ERROR:
+        # 用独立计数器限制 MATH_ERROR 重试，防止 Agent 2 持续返回空树导致无限循环
+        if state.miner_retry_count >= MAX_MINER_RETRIES:
+            return "__end__"  # MATH_ERROR 耗尽，放弃本轮（selected_branch=None → phase1_router 终止）
         return "bottleneck_miner"
     else:
         # 兜底：重新生成假设
@@ -154,6 +158,7 @@ def write_math_error_to_ledger(state: ResearchState) -> dict:
         "current_hypothesis": None,
         "critic_verdict": None,
         "last_error_keywords": [],  # 清空，避免污染下一轮
+        "miner_retry_count": state.miner_retry_count + 1,  # 累计 MATH_ERROR 重试次数
     }
 
 

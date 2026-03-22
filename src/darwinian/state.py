@@ -214,6 +214,8 @@ class ResearchState(BaseModel):
     max_outer_loops: int = Field(default=5, description="外层大循环上限")
     # Phase 1 内层假设重试计数（每轮 Phase 1 开始时重置）
     hypothesis_retry_count: int = Field(default=0, description="当前 Phase 1 内层重试次数（NOT_NOVEL 触发）")
+    # Phase 1 MATH_ERROR 重试计数（每轮 Phase 1 开始时重置）
+    miner_retry_count: int = Field(default=0, description="当前 Phase 1 MATH_ERROR 重试次数（Agent 1 重跑计数）")
 
     # 跨节点传递的错误关键词（由 theoretical_critic / diagnostician 写入，由 ledger 节点读取）
     last_error_keywords: list[str] = Field(default_factory=list, description="最近一次失败提取的禁用关键词")
