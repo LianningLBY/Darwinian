@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json as _json
+import os
 import re
 import string
 from itertools import combinations
@@ -22,6 +23,7 @@ from typing import Any, Iterable
 from langchain_core.messages import HumanMessage, SystemMessage
 
 from darwinian.state import ConceptGraph, Entity, EntityPair, LimitationRef, PaperInfo
+from darwinian.tools import arxiv_search
 from darwinian.tools import semantic_scholar as ss
 from darwinian.utils.json_parser import parse_llm_json
 from darwinian.utils.llm_retry import invoke_with_retry
@@ -500,20 +502,38 @@ def build_concept_graph(
     top_by_relevance: int = 60,
     top_by_popularity: int = 20,
     max_novel_pairs: int = 10,
+    backend: str | None = None,
 ) -> ConceptGraph:
     """
     从 research_direction 开始，走完 step 1–6.5 的完整管道，产出 ConceptGraph。
 
     每一步失败都降级（不抛异常），最终 is_sufficient 反映数据是否够硬约束。
+
+    Args:
+        backend: 文献源。None 时读 DARWINIAN_SEARCH_BACKEND 环境变量，默认 "s2"。
+                 - "s2": Semantic Scholar，支持 citation graph 一跳扩展（需要 S2_API_KEY 较稳）
+                 - "arxiv": arxiv.org，公开免费无限流，但无 citation graph（跳过 step 2）
     """
-    # Step 1: 分两档检索
-    seeds = ss.search_papers_two_tiered(
-        research_direction,
-        classic_limit=classic_limit,
-        recent_limit=recent_limit,
-    )
-    # Step 2: 一跳扩展
-    candidates = expand_one_hop(seeds, max_refs_per_paper, max_cits_per_paper)
+    if backend is None:
+        backend = os.environ.get("DARWINIAN_SEARCH_BACKEND", "s2").lower()
+
+    # Step 1 + Step 2（视 backend 而定）
+    if backend == "arxiv":
+        # arxiv 没有 citation 端点 → 分两档搜索直接当候选池
+        candidates = arxiv_search.search_papers_arxiv_two_tiered(
+            research_direction,
+            classic_limit=classic_limit,
+            recent_limit=recent_limit,
+        )
+    else:
+        # 默认 S2：分两档 + 一跳扩展
+        seeds = ss.search_papers_two_tiered(
+            research_direction,
+            classic_limit=classic_limit,
+            recent_limit=recent_limit,
+        )
+        candidates = expand_one_hop(seeds, max_refs_per_paper, max_cits_per_paper)
+
     # Step 3: 清洗 + 剪枝
     top_papers = filter_and_rank(candidates, top_k=top_k_papers)
     # Step 4: 批量抽取

@@ -465,3 +465,45 @@ class TestBuildConceptGraph:
         assert len(graph.limitations) == 1
         # 数据太少：is_sufficient 应为 False
         assert graph.is_sufficient is False
+
+    def test_arxiv_backend_skips_s2_and_expansion(self):
+        """backend=arxiv 时应走 arxiv 源，完全绕过 S2 + expand_one_hop"""
+        fake_arxiv_papers = [
+            {"paperId": "arxiv:2401.00001", "title": "T", "abstract": "x" * 200,
+             "year": 2024, "citationCount": 0, "source": "arxiv"},
+        ]
+        fake_llm = MagicMock()
+        fake_llm.invoke = MagicMock(return_value=MagicMock(content=(
+            '{"papers":[{"paper_id":"arxiv:2401.00001","method":["adam"],'
+            '"dataset":[],"metric":[],"task_type":"classification","limitations":[]}]}'
+        )))
+
+        with patch("darwinian.tools.arxiv_search.search_papers_arxiv_two_tiered",
+                   return_value=fake_arxiv_papers) as mock_arxiv:
+            with patch("darwinian.tools.semantic_scholar.search_papers_two_tiered") as mock_s2:
+                with patch("darwinian.utils.knowledge_graph.expand_one_hop") as mock_expand:
+                    graph = kg.build_concept_graph(
+                        research_direction="test",
+                        core_problem="test",
+                        llm=fake_llm,
+                        backend="arxiv",
+                    )
+        # arxiv 源被调用，S2 + expand 都没调用
+        assert mock_arxiv.call_count == 1
+        assert mock_s2.call_count == 0
+        assert mock_expand.call_count == 0
+        assert graph.papers[0].paper_id == "arxiv:2401.00001"
+
+    def test_env_var_sets_backend(self, monkeypatch):
+        """DARWINIAN_SEARCH_BACKEND=arxiv 应该触发 arxiv 分支"""
+        monkeypatch.setenv("DARWINIAN_SEARCH_BACKEND", "arxiv")
+        fake_llm = MagicMock()
+        fake_llm.invoke = MagicMock(return_value=MagicMock(
+            content='{"papers":[]}'
+        ))
+        with patch("darwinian.tools.arxiv_search.search_papers_arxiv_two_tiered",
+                   return_value=[]) as mock_arxiv:
+            with patch("darwinian.tools.semantic_scholar.search_papers_two_tiered") as mock_s2:
+                kg.build_concept_graph("x", "x", llm=fake_llm)  # 不传 backend
+        assert mock_arxiv.call_count == 1
+        assert mock_s2.call_count == 0
