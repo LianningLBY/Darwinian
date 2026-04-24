@@ -77,17 +77,17 @@ python examples/run_research.py
 
 ```
 src/darwinian/
-├── state.py                    # 全局强类型状态 (ResearchState)
+├── state.py                    # 全局强类型状态 (ResearchState + ConceptGraph v2)
 ├── agents/
-│   ├── bottleneck_miner.py     # Agent 1: 文献挖掘
-│   ├── hypothesis_generator.py # Agent 2: 方案合成 + 去重检查
+│   ├── bottleneck_miner.py     # Agent 1: 文献挖掘 + ConceptGraph 构建
+│   ├── hypothesis_generator.py # Agent 2: 方案合成 + 硬约束校验 + step 7.5 组合查重
 │   ├── theoretical_critic.py   # Agent 3: 理论审查
 │   ├── code_architect.py       # Agent 4: 实验代码生成
 │   ├── diagnostician.py        # Agent 5: 执行结果诊断
 │   ├── poison_generator.py     # Agent 6: 对抗数据生成（策略库选择）
 │   └── publish_evaluator.py    # Agent 7: 成果验收
 ├── tools/
-│   ├── semantic_scholar.py     # Semantic Scholar API 封装
+│   ├── semantic_scholar.py     # S2 API: 搜索 + 引用图遍历 + pickle 缓存 (7d TTL)
 │   ├── code_executor.py        # Docker 沙箱执行
 │   └── perturbation_strategies.py  # 7 种固定扰动策略
 ├── graphs/
@@ -95,8 +95,33 @@ src/darwinian/
 │   ├── experiment_graph.py     # Phase 2 子图
 │   └── main_graph.py           # 主图（大循环控制）
 └── utils/
-    └── similarity.py           # 余弦相似度（TF-IDF，离线可用）
+    ├── similarity.py           # 余弦相似度（TF-IDF，离线可用）
+    ├── json_parser.py          # LLM JSON 解析（含截断修复）
+    ├── llm_retry.py            # 瞬时网络错误重试
+    └── knowledge_graph.py      # Phase 1 v2: ConceptGraph 构建管道
 ```
+
+## Phase 1 v2 — 从"LLM 自由联想"到"在真实论文网络上填空"
+
+Agent 1 + Agent 2 不再让 LLM 凭空发挥：
+
+1. **分两档检索** — 经典论文 + 近三年新作
+2. **一跳引用图扩展** — refs + citations，去重剪枝到 top 60 篇
+3. **批量实体抽取** — Haiku 级小模型从 title+abstract 抽 {method, dataset, metric, task_type, limitations}
+4. **别名合并** — word-boundary substring containment（`adam` ⊂ `adam optimizer` 合并；`bert` ⊂ `bertopic` **不**合并）
+5. **相关性裁剪** — TF-IDF top 60 + 论文数 top 20 兜底（防跨域冷门被误杀）
+6. **结构洞发现** — 共现矩阵找"高频但从未共现"的术语对，score = min(papers_a, papers_b)
+7. **硬约束** — Agent 2 每分支必须：cited ≥ 2 entities from ≥ 2 papers、绑 1 个 limitation_id、跨分支覆盖 ≥ 2 task_types
+8. **反馈重试** — 校验失败时带具体候选（同类型 + 按论文数降序 top 3）重试最多 3 次
+9. **组合查重（step 7.5）** — cited entities 组合去 S2 查重，标题+摘要同时含所有术语才算命中
+10. **优雅降级** — concept_graph 数据不足时 Agent 2 走老 prompt 自由发挥（不强制硬约束）
+
+完整设计见 `PHASE1_V2_DESIGN.md`。
+
+环境变量：
+- `SEMANTIC_SCHOLAR_API_KEY` — 可选，提速到 10 req/s
+- `DARWINIAN_S2_CACHE_DIR` — S2 缓存目录，默认 `.cache/s2/`
+- `DARWINIAN_S2_CACHE_TTL` — 缓存 TTL（秒），默认 7 天
 
 ## 关键防护机制
 
