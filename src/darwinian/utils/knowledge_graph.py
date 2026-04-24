@@ -4,17 +4,26 @@ Phase 1 v2 核心模块：从论文网络构建 ConceptGraph。
 11 步流水线中这个模块承担 step 2 / 3 / 4 / 5 / 6 / 6.5：
   - expand_one_hop: 对每篇种子论文做一跳引用图扩展
   - filter_and_rank: 清洗、去重、剪枝候选池到 top K
-  - batch_extract_entities: 小模型 batch 抽四元组 + limitations（commit 4）
-  - canonicalize_merge: 别名合并（commit 4）
+  - batch_extract_entities: 小模型 batch 抽四元组 + limitations
+  - canonicalize_merge: 别名合并
   - rank_relevance_top_k: TF-IDF 相关性 + 频次兜底（commit 5）
   - find_novel_pairs: 共现矩阵找结构洞（commit 5）
 """
 
 from __future__ import annotations
 
-from typing import Iterable
+import hashlib
+import json as _json
+import re
+import string
+from typing import Any, Iterable
 
+from langchain_core.messages import HumanMessage, SystemMessage
+
+from darwinian.state import Entity, LimitationRef, PaperInfo
 from darwinian.tools import semantic_scholar as ss
+from darwinian.utils.json_parser import parse_llm_json
+from darwinian.utils.llm_retry import invoke_with_retry
 
 
 # ---------------------------------------------------------------------------
@@ -97,3 +106,265 @@ def filter_and_rank(
     )
 
     return filtered[:top_k]
+
+
+# ---------------------------------------------------------------------------
+# Step 4: 批量实体抽取（小模型）
+# ---------------------------------------------------------------------------
+
+EXTRACT_SYSTEM_PROMPT = """你是一位结构化信息抽取助手。请从下列论文的标题和摘要中，为每篇论文抽取以下字段：
+
+- paper_id: 保持输入给你的原始值，不要改写
+- method: 论文中使用/提出的**具体方法名**列表。规则：用最短通用英文名、全小写、去连字符/下划线。如 "Adam Optimizer" → "adam"
+- dataset: 论文使用/评估的数据集名称列表（如 "imagenet", "coco"）
+- metric: 论文使用的评估指标列表（如 "top-1 accuracy", "bleu"）
+- task_type: 任务类型，从 ["classification", "regression", "generation", "retrieval", "detection", "segmentation", "reinforcement_learning", "language_modeling", "other"] 选一个
+- limitations: 论文自己承认的缺陷/局限列表，每条一句话中文或英文
+
+请严格返回 JSON 对象，格式：
+{
+  "papers": [
+    {"paper_id": "...", "method": [...], "dataset": [...], "metric": [...], "task_type": "...", "limitations": [...]},
+    ...
+  ]
+}
+
+不要添加任何说明文字或 markdown。
+"""
+
+
+def _chunk(seq: list, n: int) -> Iterable[list]:
+    """把列表切成大小 n 的批"""
+    for i in range(0, len(seq), n):
+        yield seq[i:i + n]
+
+
+def _build_extract_user_prompt(batch: list[dict]) -> str:
+    """把一批 paper 序列化为 LLM 可读的紧凑 JSON（只保留抽取需要的字段）"""
+    compact = [
+        {
+            "paper_id": p.get("paperId", ""),
+            "title": (p.get("title") or "")[:300],
+            "abstract": (p.get("abstract") or "")[:1500],
+        }
+        for p in batch
+    ]
+    return "请处理以下论文：\n" + _json.dumps(compact, ensure_ascii=False)
+
+
+def batch_extract_entities(
+    papers: list[dict],
+    llm: Any,
+    batch_size: int = 8,
+) -> list[dict]:
+    """
+    批量抽取实体五元组。每 batch_size 篇调一次 LLM，减少请求数。
+
+    Args:
+        papers: filter_and_rank() 的输出
+        llm: LangChain 兼容 ChatModel（推荐用 Haiku）
+        batch_size: 每批论文数
+
+    Returns:
+        list of {paper_id, method[], dataset[], metric[], task_type, limitations[]}。
+        某个 batch 解析失败会被跳过，不影响其他 batch。
+    """
+    all_extractions: list[dict] = []
+    for batch in _chunk(papers, batch_size):
+        messages = [
+            SystemMessage(content=EXTRACT_SYSTEM_PROMPT),
+            HumanMessage(content=_build_extract_user_prompt(batch)),
+        ]
+        try:
+            response = invoke_with_retry(llm, messages)
+            parsed = parse_llm_json(response.content)
+        except Exception as e:
+            print(f"[knowledge_graph] batch extract 失败，跳过：{type(e).__name__}")
+            continue
+
+        papers_field = parsed.get("papers") if isinstance(parsed, dict) else None
+        if not isinstance(papers_field, list):
+            continue
+        for item in papers_field:
+            if isinstance(item, dict) and item.get("paper_id"):
+                all_extractions.append(item)
+    return all_extractions
+
+
+# ---------------------------------------------------------------------------
+# Step 5: 别名归一化 + 全局合并
+# ---------------------------------------------------------------------------
+
+_PUNCT_TABLE = str.maketrans({c: " " for c in string.punctuation})
+
+
+def _normalize(name: str) -> str:
+    """
+    实体名规范化：小写 + 去标点 + 多空白压成单空格 + 首尾去空。
+    这是 precise match 用的 key，原始写法保留在 aliases 里。
+    """
+    if not isinstance(name, str):
+        return ""
+    s = name.lower().translate(_PUNCT_TABLE)
+    return re.sub(r"\s+", " ", s).strip()
+
+
+def _word_boundary_contains(short: str, long: str) -> bool:
+    """
+    短串是否作为完整词出现在长串中。
+    例: "adam" 在 "adam optimizer" 里 → True；"bert" 在 "bertopic" → False。
+    """
+    if not short or not long or short == long:
+        return False
+    pattern = r"\b" + re.escape(short) + r"\b"
+    return re.search(pattern, long) is not None
+
+
+def _limitation_id(text: str, paper_id: str) -> str:
+    """LimitationRef 的稳定 id：md5(text+paper_id)[:8]"""
+    return hashlib.md5(f"{text}|{paper_id}".encode("utf-8")).hexdigest()[:8]
+
+
+VALID_TYPES = {"method", "dataset", "metric", "task_type"}
+
+
+def canonicalize_merge(
+    papers: list[dict],
+    raw_extractions: list[dict],
+) -> tuple[list[Entity], list[LimitationRef], list[PaperInfo]]:
+    """
+    把 batch_extract_entities 的原始输出合并为 ConceptGraph 的三个列表。
+
+    流程：
+      1. 按 (type, normalized_name) 精确分组，合并 paper_ids 和原始 aliases
+      2. 同类型内按长度升序，做 word-boundary substring 合并（短 ⊂ 长 → 短并入长）
+      3. limitations 用 md5 生成稳定 id，同文本+paper_id 去重
+      4. PaperInfo 从 S2 原始数据 + 抽取出的 task_type 组装
+
+    Args:
+        papers: filter_and_rank 的输出（包含 S2 元数据）
+        raw_extractions: batch_extract_entities 的输出
+
+    Returns:
+        (entities, limitations, paper_infos)
+    """
+    # --- 建索引：paper_id -> S2 原始数据
+    paper_by_id: dict[str, dict] = {p.get("paperId"): p for p in papers if p.get("paperId")}
+
+    # --- 第 1 步：按 (type, normalized) 分组
+    # key = (type, normalized_name)，value = {"canonical": 最长原始名, "aliases": set, "paper_ids": set}
+    buckets: dict[tuple[str, str], dict] = {}
+
+    def _add(e_type: str, raw_name: str, paper_id: str):
+        norm = _normalize(raw_name)
+        if not norm or e_type not in VALID_TYPES:
+            return
+        key = (e_type, norm)
+        bucket = buckets.setdefault(key, {"canonical": raw_name, "aliases": set(), "paper_ids": set()})
+        # canonical 取最短的原始名（符合 prompt 要求"最短通用名"）
+        if len(raw_name) < len(bucket["canonical"]):
+            bucket["aliases"].add(bucket["canonical"])
+            bucket["canonical"] = raw_name
+        elif raw_name != bucket["canonical"]:
+            bucket["aliases"].add(raw_name)
+        bucket["paper_ids"].add(paper_id)
+
+    limitations: list[LimitationRef] = []
+    seen_lim_ids: set[str] = set()
+    extracted_task_types: dict[str, str] = {}  # paper_id → task_type
+
+    for item in raw_extractions:
+        pid = item.get("paper_id", "")
+        if not pid:
+            continue
+        for m in item.get("method") or []:
+            _add("method", str(m), pid)
+        for d in item.get("dataset") or []:
+            _add("dataset", str(d), pid)
+        for met in item.get("metric") or []:
+            _add("metric", str(met), pid)
+        tt = item.get("task_type")
+        if isinstance(tt, str) and tt.strip():
+            _add("task_type", tt, pid)
+            extracted_task_types[pid] = tt.strip().lower()
+        # limitations
+        for lim in item.get("limitations") or []:
+            if not isinstance(lim, str) or not lim.strip():
+                continue
+            lid = _limitation_id(lim, pid)
+            if lid in seen_lim_ids:
+                continue
+            seen_lim_ids.add(lid)
+            limitations.append(LimitationRef(id=lid, text=lim.strip(), source_paper_id=pid))
+
+    # 初始 Entity 列表（精确合并后）
+    entities: list[Entity] = []
+    for (etype, norm), b in buckets.items():
+        entities.append(Entity(
+            canonical_name=_normalize(b["canonical"]),   # 再 normalize 一次确保 canonical 规范
+            aliases=sorted(b["aliases"]),
+            type=etype,
+            paper_ids=sorted(b["paper_ids"]),
+        ))
+
+    # --- 第 2 步：同类型内 word-boundary containment 合并
+    entities = _merge_containment(entities)
+
+    # --- 第 3 步：PaperInfo 组装
+    paper_infos: list[PaperInfo] = []
+    for pid, p in paper_by_id.items():
+        paper_infos.append(PaperInfo(
+            paper_id=pid,
+            title=p.get("title") or "",
+            abstract=p.get("abstract") or "",
+            year=p.get("year") or 0,
+            citation_count=p.get("citationCount") or 0,
+            task_type=extracted_task_types.get(pid, ""),
+            source="semantic_scholar",
+        ))
+
+    return entities, limitations, paper_infos
+
+
+def _merge_containment(entities: list[Entity]) -> list[Entity]:
+    """
+    同类型内按 canonical_name 长度升序遍历。
+    若 short 作为完整词出现在 long 里（且类型相同），把 short 并入 long，short 名字进 long.aliases。
+    被并入的 short 从结果中移除。
+    """
+    by_type: dict[str, list[Entity]] = {}
+    for e in entities:
+        by_type.setdefault(e.type, []).append(e)
+
+    merged: list[Entity] = []
+    for etype, group in by_type.items():
+        # 按长度升序，短的先被考察
+        group.sort(key=lambda e: len(e.canonical_name))
+        alive = list(group)
+        i = 0
+        while i < len(alive):
+            short = alive[i]
+            target_idx = -1
+            for j in range(i + 1, len(alive)):
+                long = alive[j]
+                if _word_boundary_contains(short.canonical_name, long.canonical_name):
+                    target_idx = j
+                    break
+            if target_idx >= 0:
+                tgt = alive[target_idx]
+                # short 的 aliases + canonical_name 并入 long
+                combined_aliases = set(tgt.aliases) | set(short.aliases) | {short.canonical_name}
+                combined_paper_ids = set(tgt.paper_ids) | set(short.paper_ids)
+                alive[target_idx] = Entity(
+                    canonical_name=tgt.canonical_name,
+                    aliases=sorted(combined_aliases - {tgt.canonical_name}),
+                    type=tgt.type,
+                    paper_ids=sorted(combined_paper_ids),
+                )
+                # short 移除
+                alive.pop(i)
+                # 不自增 i，继续考察新位置
+                continue
+            i += 1
+        merged.extend(alive)
+    return merged
