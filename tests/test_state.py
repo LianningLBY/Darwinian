@@ -18,6 +18,12 @@ from darwinian.state import (
     CriticVerdict,
     ExecutionVerdict,
     FinalVerdict,
+    # Phase 1 v2 新增
+    Entity,
+    LimitationRef,
+    PaperInfo,
+    EntityPair,
+    ConceptGraph,
 )
 
 
@@ -61,7 +67,6 @@ class TestHypothesis:
             description="测试方案",
             algorithm_logic="步骤 1 → 步骤 2",
             math_formulation=r"f(x) = \sigma(Wx + b)",
-            source_domain="控制论",
         )
 
     def test_valid_hypothesis(self):
@@ -108,6 +113,86 @@ class TestResearchState:
         )
         assert len(state.failed_ledger) == 1
         assert state.failed_ledger[0].failure_type == "MATH_ERROR"
+
+
+class TestConceptGraph:
+    """Phase 1 v2 新增数据结构验证"""
+
+    def test_entity_minimal(self):
+        e = Entity(canonical_name="adam", type="method", paper_ids=["p1"])
+        assert e.canonical_name == "adam"
+        assert e.type == "method"
+        assert e.aliases == []
+
+    def test_entity_type_literal_enforced(self):
+        with pytest.raises(Exception):
+            Entity(canonical_name="x", type="invalid_type", paper_ids=[])
+
+    def test_limitation_ref(self):
+        l = LimitationRef(id="a1b2c3d4", text="收敛慢", source_paper_id="p3")
+        assert l.id == "a1b2c3d4"
+        assert l.source_paper_id == "p3"
+
+    def test_paper_info_defaults(self):
+        p = PaperInfo(paper_id="p1")
+        assert p.abstract == ""
+        assert p.year == 0
+        assert p.citation_count == 0
+        assert p.source == "semantic_scholar"
+
+    def test_concept_graph_lookup(self):
+        g = ConceptGraph(
+            entities=[
+                Entity(canonical_name="adam", type="method", paper_ids=["p1"]),
+                Entity(canonical_name="resnet", type="method", paper_ids=["p2"]),
+            ],
+            limitations=[
+                LimitationRef(id="L_001", text="过拟合", source_paper_id="p1"),
+            ],
+        )
+        assert g.entity_by_name("adam").paper_ids == ["p1"]
+        assert g.entity_by_name("nonexistent") is None
+        assert g.limitation_by_id("L_001").text == "过拟合"
+        assert g.limitation_by_id("nope") is None
+        assert g.is_sufficient is False  # 默认 False
+
+    def test_state_accepts_concept_graph(self):
+        g = ConceptGraph(is_sufficient=True)
+        state = ResearchState(research_direction="test", concept_graph=g)
+        assert state.concept_graph is not None
+        assert state.concept_graph.is_sufficient is True
+
+
+class TestAbstractionBranchV2:
+    """AbstractionBranch v2 新字段"""
+
+    def test_new_fields_default_empty(self):
+        b = AbstractionBranch(
+            name="x", description="x", algorithm_logic="x", math_formulation="x",
+        )
+        assert b.cited_entity_names == []
+        assert b.solved_limitation_id == ""
+        assert b.existing_combination is False
+        assert b.existing_combination_refs == []
+
+    def test_source_domain_now_optional(self):
+        # v1 时 source_domain 是 required，v2 改为 optional default=""
+        b = AbstractionBranch(
+            name="x", description="x", algorithm_logic="x", math_formulation="x",
+        )
+        assert b.source_domain == ""
+
+    def test_cited_entities_and_limitation(self):
+        b = AbstractionBranch(
+            name="sparse_attn_mamba",
+            description="混合架构",
+            algorithm_logic="...",
+            math_formulation="...",
+            cited_entity_names=["self_attention", "mamba"],
+            solved_limitation_id="a1b2c3d4",
+        )
+        assert "mamba" in b.cited_entity_names
+        assert b.solved_limitation_id == "a1b2c3d4"
 
 
 class TestEnums:

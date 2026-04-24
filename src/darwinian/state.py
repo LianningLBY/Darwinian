@@ -8,7 +8,7 @@ ResearchState — 全局强类型状态定义
 from __future__ import annotations
 
 from enum import Enum
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 from langgraph.graph.message import add_messages
 
@@ -65,13 +65,95 @@ class FailedRecord(BaseModel):
     banned_keywords: list[str] = Field(default_factory=list, description="该方向的禁用关键词，用于 Agent 1 文献过滤")
 
 
+class PaperInfo(BaseModel):
+    """论文元数据 — ConceptGraph 中的节点"""
+    paper_id: str = Field(description="Semantic Scholar paperId 或 arxiv id")
+    title: str = Field(default="")
+    abstract: str = Field(default="")
+    year: int = Field(default=0)
+    citation_count: int = Field(default=0)
+    task_type: str = Field(default="", description="由实体抽取填写：classification/regression/NLP/CV/RL/...")
+    source: str = Field(default="semantic_scholar", description="来源：semantic_scholar / arxiv / ...")
+
+
+class Entity(BaseModel):
+    """从论文中抽取的术语实体（方法/数据集/指标/任务类型）"""
+    canonical_name: str = Field(description="规范化名字：全小写、去标点、最短通用英文名")
+    aliases: list[str] = Field(default_factory=list, description="合并前的原始写法集合")
+    type: Literal["method", "dataset", "metric", "task_type"] = Field(description="实体类型")
+    paper_ids: list[str] = Field(default_factory=list, description="出现在哪些 paper 中")
+
+
+class LimitationRef(BaseModel):
+    """论文承认的某条缺陷 — 可被 AbstractionBranch 作为 solved_limitation_id 引用"""
+    id: str = Field(description="稳定哈希 id：hashlib.md5((text+paper_id).encode()).hexdigest()[:8]")
+    text: str = Field(description="缺陷的自然语言描述（一句话）")
+    source_paper_id: str = Field(description="来源论文 paperId")
+
+
+class EntityPair(BaseModel):
+    """共现矩阵中的一条"结构洞"候选：两端各自成熟但从未共现"""
+    entity_a: str = Field(description="Entity.canonical_name")
+    entity_b: str = Field(description="Entity.canonical_name")
+    score: int = Field(description="min(paper_count_a, paper_count_b)，偏向两端都成熟的组合")
+
+
+class ConceptGraph(BaseModel):
+    """
+    Phase 1 v2 核心产物：从 60+ 篇论文抽取出的术语 + 缺陷 + 结构洞。
+    由 bottleneck_miner 填充，供 hypothesis_generator 作为硬约束源。
+    """
+    papers: list[PaperInfo] = Field(default_factory=list)
+    entities: list[Entity] = Field(default_factory=list)
+    limitations: list[LimitationRef] = Field(default_factory=list)
+    novel_pair_hints: list[EntityPair] = Field(
+        default_factory=list,
+        description="共现矩阵 top-10：从未共现但各自高频的术语对（潜在结构洞）",
+    )
+    is_sufficient: bool = Field(
+        default=False,
+        description="数据是否足够支撑硬约束。False 时 hypothesis_generator 降级走老 prompt。",
+    )
+
+    def entity_by_name(self, name: str) -> Entity | None:
+        """按 canonical_name 查实体（未做归一化，调用方负责 normalize）"""
+        for e in self.entities:
+            if e.canonical_name == name:
+                return e
+        return None
+
+    def limitation_by_id(self, lid: str) -> LimitationRef | None:
+        for l in self.limitations:
+            if l.id == lid:
+                return l
+        return None
+
+
 class AbstractionBranch(BaseModel):
     """单个抽象方案分支"""
     name: str = Field(description="方案名称")
     description: str = Field(description="方案描述")
     algorithm_logic: str = Field(description="算法逻辑说明")
     math_formulation: str = Field(description="数学公式映射")
-    source_domain: str = Field(description="灵感来源领域（跨域迁移）")
+    # Phase 1 v2 新增：硬约束字段
+    cited_entity_names: list[str] = Field(
+        default_factory=list,
+        description="引用的术语（必须在当轮 ConceptGraph.entities 里）",
+    )
+    solved_limitation_id: str = Field(
+        default="",
+        description="声明要解决的缺陷 id（必须在当轮 ConceptGraph.limitations 里）",
+    )
+    existing_combination: bool = Field(
+        default=False,
+        description="step 7.5 填写：cited_entity_names 组合是否已有人做过",
+    )
+    existing_combination_refs: list[str] = Field(
+        default_factory=list,
+        description="若 existing_combination=True，列出命中的 paperId（最多 3 个）",
+    )
+    # 已弃用字段（保留兼容，后续 commit 清理 prompt 引用）
+    source_domain: str = Field(default="", description="[已弃用] v1 用自由文字标领域；v2 用 cited_entities 派生")
 
 
 class Hypothesis(BaseModel):
@@ -180,6 +262,12 @@ class ResearchState(BaseModel):
     failed_ledger: list[FailedRecord] = Field(
         default_factory=list,
         description="历史失败记录，含语义向量，用于余弦相似度去重",
+    )
+
+    # Phase 1 v2：从论文网络抽出的术语 + 缺陷 + 结构洞（由 bottleneck_miner 填充）
+    concept_graph: ConceptGraph | None = Field(
+        default=None,
+        description="Phase 1 v2 核心产物，供 hypothesis_generator 作为硬约束源",
     )
 
     # 当前假设
