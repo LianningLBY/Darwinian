@@ -229,7 +229,44 @@ def _limitation_id(text: str, paper_id: str) -> str:
     return hashlib.md5(f"{text}|{paper_id}".encode("utf-8")).hexdigest()[:8]
 
 
-VALID_TYPES = {"method", "dataset", "metric", "task_type"}
+VALID_TYPES = {"method", "dataset", "metric"}
+
+
+# LLM 常见的"抽不到"占位短语，用于 limitation 过滤
+_INVALID_LIMITATION_PATTERNS = [
+    r"does not explicitly",
+    r"does not state",
+    r"no (explicit|specific|clear) limitation",
+    r"no limitations? (are |is )?(mentioned|stated|given)",
+    r"not (?:explicitly |specifically )?(?:mentioned|stated|discussed|given)",
+    r"the abstract (?:does not|doesn't)",
+    r"^n/?a\b",
+    r"^none\b",
+    r"unknown",
+    r"not (?:available|provided|applicable)",
+]
+_INVALID_LIMITATION_RE = re.compile(
+    "|".join(_INVALID_LIMITATION_PATTERNS), re.IGNORECASE
+)
+
+
+def _is_valid_limitation(text: str) -> bool:
+    """
+    判断 LLM 抽出的 limitation 是否有效内容，还是"没抽到"的占位语。
+
+    规则：
+      - 长度过短（< 15 字符）视为无效
+      - 命中 _INVALID_LIMITATION_PATTERNS 任一模式视为无效
+      - 其他视为有效
+    """
+    if not isinstance(text, str):
+        return False
+    stripped = text.strip()
+    if len(stripped) < 15:
+        return False
+    if _INVALID_LIMITATION_RE.search(stripped):
+        return False
+    return True
 
 
 def canonicalize_merge(
@@ -241,8 +278,10 @@ def canonicalize_merge(
 
     流程：
       1. 按 (type, normalized_name) 精确分组，合并 paper_ids 和原始 aliases
+         （仅 method / dataset / metric；task_type 不是 Entity，只写入 PaperInfo）
       2. 同类型内按长度升序，做 word-boundary substring 合并（短 ⊂ 长 → 短并入长）
-      3. limitations 用 md5 生成稳定 id，同文本+paper_id 去重
+      3. limitations 过滤无效占位语（"does not state"、"N/A" 等），
+         用 md5 生成稳定 id，同文本+paper_id 去重
       4. PaperInfo 从 S2 原始数据 + 抽取出的 task_type 组装
 
     Args:
@@ -289,17 +328,18 @@ def canonicalize_merge(
             _add("metric", str(met), pid)
         tt = item.get("task_type")
         if isinstance(tt, str) and tt.strip():
-            _add("task_type", tt, pid)
+            # task_type 只写入 PaperInfo.task_type，不进入实体表
             extracted_task_types[pid] = tt.strip().lower()
-        # limitations
+        # limitations（过滤"没抽到"占位语）
         for lim in item.get("limitations") or []:
-            if not isinstance(lim, str) or not lim.strip():
+            if not _is_valid_limitation(lim):
                 continue
-            lid = _limitation_id(lim, pid)
+            text = lim.strip()
+            lid = _limitation_id(text, pid)
             if lid in seen_lim_ids:
                 continue
             seen_lim_ids.add(lid)
-            limitations.append(LimitationRef(id=lid, text=lim.strip(), source_paper_id=pid))
+            limitations.append(LimitationRef(id=lid, text=text, source_paper_id=pid))
 
     # 初始 Entity 列表（精确合并后）
     entities: list[Entity] = []

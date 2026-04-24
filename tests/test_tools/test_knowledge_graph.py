@@ -178,6 +178,43 @@ class TestLimitationId:
         assert a != b
 
 
+class TestIsValidLimitation:
+    """过滤 LLM '抽不到' 占位语"""
+
+    def test_valid_content(self):
+        assert kg._is_valid_limitation("Slow convergence on large batch sizes.") is True
+        assert kg._is_valid_limitation("长序列推理时内存消耗爆炸式增长。") is True
+
+    def test_too_short(self):
+        assert kg._is_valid_limitation("too slow") is False
+        assert kg._is_valid_limitation("") is False
+        assert kg._is_valid_limitation("x" * 10) is False
+
+    def test_not_string(self):
+        assert kg._is_valid_limitation(None) is False
+        assert kg._is_valid_limitation(123) is False
+
+    def test_placeholder_phrases(self):
+        cases = [
+            "The abstract does not explicitly state limitations.",
+            "does not state any limitations",
+            "No explicit limitation is mentioned.",
+            "No limitations are mentioned in the abstract.",
+            "Not explicitly discussed in the abstract.",
+            "The abstract doesn't mention limitations clearly.",
+            "N/A",
+            "None",
+            "unknown limitations of the method",
+            "not available in abstract",
+        ]
+        for text in cases:
+            assert kg._is_valid_limitation(text) is False, f"应视为无效：{text!r}"
+
+    def test_case_insensitive(self):
+        assert kg._is_valid_limitation("THE ABSTRACT DOES NOT EXPLICITLY STATE LIMITATIONS") is False
+        assert kg._is_valid_limitation("No Limitations Mentioned") is False
+
+
 # ---------------------------------------------------------------------------
 # batch_extract_entities（用 fake LLM）
 # ---------------------------------------------------------------------------
@@ -275,17 +312,22 @@ class TestCanonicalizeMerge:
 
     def test_limitations_extracted_with_stable_id(self):
         raw = [
-            {"paper_id": "p1", "method": [], "dataset": [], "metric": [], "task_type": "o", "limitations": ["收敛慢"]},
+            {"paper_id": "p1", "method": [], "dataset": [], "metric": [], "task_type": "o",
+             "limitations": ["Convergence is slow on large batch sizes."]},
         ]
         _, limitations, _ = kg.canonicalize_merge(self._papers(), raw)
         assert len(limitations) == 1
-        assert limitations[0].text == "收敛慢"
+        assert limitations[0].text == "Convergence is slow on large batch sizes."
         assert limitations[0].source_paper_id == "p1"
         assert len(limitations[0].id) == 8
 
     def test_duplicate_limitation_deduped(self):
         raw = [
-            {"paper_id": "p1", "method": [], "dataset": [], "metric": [], "task_type": "o", "limitations": ["a", "a"]},
+            {"paper_id": "p1", "method": [], "dataset": [], "metric": [], "task_type": "o",
+             "limitations": [
+                 "Convergence is slow on large batch sizes.",
+                 "Convergence is slow on large batch sizes.",
+             ]},
         ]
         _, limitations, _ = kg.canonicalize_merge(self._papers(), raw)
         assert len(limitations) == 1
@@ -307,16 +349,46 @@ class TestCanonicalizeMerge:
         # paper_infos 依然基于输入 papers 构造
         assert len(paper_infos) == 2
 
-    def test_invalid_type_skipped(self):
-        # 防御：LLM 可能乱写 task_type 导致某些条目，但 _add 只接受 VALID_TYPES
-        # 这里间接测试：task_type 写入 Entity.type="task_type"，值作为 canonical_name
+    def test_task_type_not_in_entities(self):
+        """task_type 不应作为 Entity 进入实体表（只写入 PaperInfo.task_type）"""
         raw = [
-            {"paper_id": "p1", "method": [], "dataset": [], "metric": [], "task_type": "my_weird_type", "limitations": []},
+            {"paper_id": "p1", "method": ["adam"], "dataset": [], "metric": [],
+             "task_type": "classification", "limitations": []},
         ]
-        entities, _, _ = kg.canonicalize_merge(self._papers(), raw)
-        task_entities = [e for e in entities if e.type == "task_type"]
-        assert len(task_entities) == 1
-        assert task_entities[0].canonical_name == "my weird type"
+        entities, _, paper_infos = kg.canonicalize_merge(self._papers(), raw)
+        # entities 里只有 method，没有 task_type 类型
+        assert all(e.type in {"method", "dataset", "metric"} for e in entities)
+        assert all(e.type != "task_type" for e in entities)
+        # 但 paper_infos 里该 paper 的 task_type 填上了
+        p1 = next(p for p in paper_infos if p.paper_id == "p1")
+        assert p1.task_type == "classification"
+
+    def test_invalid_limitation_filtered(self):
+        """LLM 说"没抽到"的占位语不应进 limitations 列表"""
+        raw = [
+            {"paper_id": "p1", "method": [], "dataset": [], "metric": [], "task_type": "o",
+             "limitations": [
+                 "The abstract does not explicitly state limitations.",
+                 "does not state any limitations",
+                 "N/A",
+                 "None",
+                 "Slow convergence on large batch sizes.",   # 这一条是真的
+             ]},
+        ]
+        _, lims, _ = kg.canonicalize_merge(self._papers(), raw)
+        texts = [l.text for l in lims]
+        assert len(lims) == 1
+        assert texts[0] == "Slow convergence on large batch sizes."
+
+    def test_short_limitation_filtered(self):
+        """过短的 limitation（< 15 字符）过滤"""
+        raw = [
+            {"paper_id": "p1", "method": [], "dataset": [], "metric": [], "task_type": "o",
+             "limitations": ["too slow", "This is a reasonably detailed limitation statement."]},
+        ]
+        _, lims, _ = kg.canonicalize_merge(self._papers(), raw)
+        assert len(lims) == 1
+        assert "detailed" in lims[0].text
 
 
 # ---------------------------------------------------------------------------

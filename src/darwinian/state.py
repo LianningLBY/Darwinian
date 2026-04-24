@@ -77,10 +77,14 @@ class PaperInfo(BaseModel):
 
 
 class Entity(BaseModel):
-    """从论文中抽取的术语实体（方法/数据集/指标/任务类型）"""
+    """从论文中抽取的术语实体（方法/数据集/指标）
+
+    task_type 不是 Entity——它是 PaperInfo 的元数据属性，仅用于跨分支
+    多样性校验，不参与实体表、结构洞、硬约束引用。
+    """
     canonical_name: str = Field(description="规范化名字：全小写、去标点、最短通用英文名")
     aliases: list[str] = Field(default_factory=list, description="合并前的原始写法集合")
-    type: Literal["method", "dataset", "metric", "task_type"] = Field(description="实体类型")
+    type: Literal["method", "dataset", "metric"] = Field(description="实体类型")
     paper_ids: list[str] = Field(default_factory=list, description="出现在哪些 paper 中")
 
 
