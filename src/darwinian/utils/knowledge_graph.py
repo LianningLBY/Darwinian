@@ -583,7 +583,12 @@ def build_concept_graph(
     # Step 6: 相关性裁剪
     pruned = rank_relevance_top_k(entities, core_problem, top_by_relevance, top_by_popularity)
     # Step 6.5: 结构洞
-    novel_pairs = find_novel_pairs(pruned, max_pairs=max_novel_pairs)
+    # arxiv 模式无 citation graph，候选池只有 ~40 篇，实体出现频次稀疏 ——
+    # 沿用默认阈值 3 会找不到任何 pair，降到 2 才能让弱信号浮出
+    pair_min_papers = 2 if backend == "arxiv" else 3
+    novel_pairs = find_novel_pairs(
+        pruned, max_pairs=max_novel_pairs, min_papers_each=pair_min_papers,
+    )
     # 充分性
     sufficient = is_graph_sufficient(pruned, paper_infos)
 

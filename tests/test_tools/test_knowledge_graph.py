@@ -579,3 +579,48 @@ class TestBuildConceptGraph:
                 kg.build_concept_graph("x", "x", llm=fake_llm)  # 不传 backend
         assert mock_arxiv.call_count == 1
         assert mock_s2.call_count == 0
+
+    def test_arxiv_uses_lower_pair_threshold(self):
+        """arxiv 模式下 min_papers_each 降到 2（因 arxiv 无 citation graph，池子小）"""
+        fake_arxiv_papers = [
+            {"paperId": f"arxiv:{i}", "title": f"T{i}", "abstract": "x" * 200,
+             "year": 2024, "citationCount": 0, "source": "arxiv"}
+            for i in range(10)
+        ]
+        # 构造两个各自出现在 2 篇论文的 method —— s2 模式阈值=3 筛不出，arxiv 阈值=2 能筛出
+        extractions = (
+            '{"papers":['
+            '{"paper_id":"arxiv:0","method":["mamba"],"dataset":[],"metric":[],'
+            ' "task_type":"classification","limitations":[]},'
+            '{"paper_id":"arxiv:1","method":["mamba"],"dataset":[],"metric":[],'
+            ' "task_type":"classification","limitations":[]},'
+            '{"paper_id":"arxiv:2","method":["flash attention"],"dataset":[],"metric":[],'
+            ' "task_type":"classification","limitations":[]},'
+            '{"paper_id":"arxiv:3","method":["flash attention"],"dataset":[],"metric":[],'
+            ' "task_type":"classification","limitations":[]}'
+            ']}'
+        )
+        fake_llm = MagicMock()
+        fake_llm.invoke = MagicMock(return_value=MagicMock(content=extractions))
+
+        # arxiv 模式 → 应找到 (mamba × flash attention) 这一对
+        with patch("darwinian.tools.arxiv_search.search_papers_arxiv_two_tiered",
+                   return_value=fake_arxiv_papers):
+            graph_arxiv = kg.build_concept_graph(
+                research_direction="test", core_problem="test",
+                llm=fake_llm, backend="arxiv",
+            )
+        assert len(graph_arxiv.novel_pair_hints) >= 1
+        names = [{p.entity_a, p.entity_b} for p in graph_arxiv.novel_pair_hints]
+        assert {"mamba", "flash attention"} in names
+
+        # S2 模式 → 沿用阈值 3，这对达不到 3 篇要求，找不到
+        with patch("darwinian.tools.semantic_scholar.search_papers_two_tiered",
+                   return_value=fake_arxiv_papers):
+            with patch("darwinian.utils.knowledge_graph.expand_one_hop",
+                       return_value=fake_arxiv_papers):
+                graph_s2 = kg.build_concept_graph(
+                    research_direction="test", core_problem="test",
+                    llm=fake_llm, backend="s2",
+                )
+        assert len(graph_s2.novel_pair_hints) == 0
