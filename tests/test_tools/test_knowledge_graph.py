@@ -317,3 +317,151 @@ class TestCanonicalizeMerge:
         task_entities = [e for e in entities if e.type == "task_type"]
         assert len(task_entities) == 1
         assert task_entities[0].canonical_name == "my weird type"
+
+
+# ---------------------------------------------------------------------------
+# rank_relevance_top_k
+# ---------------------------------------------------------------------------
+
+class TestRankRelevance:
+    def _make(self, name, paper_ids=None, etype="method"):
+        from darwinian.state import Entity
+        return Entity(canonical_name=name, type=etype, paper_ids=paper_ids or ["p1"])
+
+    def test_empty_returns_empty(self):
+        assert kg.rank_relevance_top_k([], "some problem") == []
+
+    def test_top_k_cutoff(self):
+        entities = [self._make(f"entity_{i}") for i in range(100)]
+        out = kg.rank_relevance_top_k(entities, "test", top_by_relevance=5, top_by_popularity=0)
+        assert len(out) <= 5
+
+    def test_popularity_fallback(self):
+        # 热门实体应该通过 popularity 路径保留，即使与 core_problem 文本不相关
+        popular = self._make("xyzzy_irrelevant_word", paper_ids=[f"p{i}" for i in range(50)])
+        unpopular = self._make("quantum_compute", paper_ids=["p_only"])
+        entities = [popular, unpopular]
+        out = kg.rank_relevance_top_k(entities, "machine learning",
+                                       top_by_relevance=1, top_by_popularity=1)
+        names = {e.canonical_name for e in out}
+        assert "xyzzy_irrelevant_word" in names  # popularity 路径兜底
+
+    def test_dedupe_when_both_paths_pick_same(self):
+        popular = self._make("adam", paper_ids=[f"p{i}" for i in range(30)])
+        entities = [popular]
+        out = kg.rank_relevance_top_k(entities, "adam momentum",
+                                       top_by_relevance=1, top_by_popularity=1)
+        assert len(out) == 1
+
+    def test_different_types_not_deduped(self):
+        from darwinian.state import Entity
+        m = Entity(canonical_name="transformer", type="method", paper_ids=["p1", "p2", "p3"])
+        d = Entity(canonical_name="transformer", type="dataset", paper_ids=["p1", "p2", "p3"])
+        out = kg.rank_relevance_top_k([m, d], "transformer", 10, 10)
+        assert len(out) == 2
+
+
+# ---------------------------------------------------------------------------
+# find_novel_pairs
+# ---------------------------------------------------------------------------
+
+class TestFindNovelPairs:
+    def _make(self, name, paper_ids):
+        from darwinian.state import Entity
+        return Entity(canonical_name=name, type="method", paper_ids=paper_ids)
+
+    def test_empty_returns_empty(self):
+        assert kg.find_novel_pairs([]) == []
+
+    def test_both_mature_no_co_occurrence_pair_found(self):
+        a = self._make("mamba", ["p1", "p2", "p3"])
+        b = self._make("flash_attention", ["p4", "p5", "p6"])
+        pairs = kg.find_novel_pairs([a, b], min_papers_each=3)
+        assert len(pairs) == 1
+        assert {pairs[0].entity_a, pairs[0].entity_b} == {"mamba", "flash_attention"}
+        # score = min(3, 3) = 3
+        assert pairs[0].score == 3
+
+    def test_co_occurring_pair_excluded(self):
+        a = self._make("adam", ["p1", "p2", "p3"])
+        b = self._make("resnet", ["p3", "p4", "p5"])  # 共现于 p3
+        pairs = kg.find_novel_pairs([a, b], min_papers_each=3)
+        assert pairs == []
+
+    def test_below_min_papers_excluded(self):
+        a = self._make("a", ["p1"])   # 仅 1 篇
+        b = self._make("b", ["p2", "p3", "p4"])
+        pairs = kg.find_novel_pairs([a, b], min_papers_each=3)
+        assert pairs == []
+
+    def test_score_uses_min_not_sum(self):
+        a = self._make("popular", ["p1", "p2", "p3", "p4", "p5", "p6", "p7", "p8", "p9", "p10"])
+        b = self._make("mature", ["p20", "p21", "p22"])
+        pairs = kg.find_novel_pairs([a, b], min_papers_each=3)
+        assert pairs[0].score == 3  # min(10, 3)，不是 sum
+
+    def test_top_sorted_by_score(self):
+        a = self._make("a", [f"x{i}" for i in range(10)])
+        b = self._make("b", [f"y{i}" for i in range(5)])
+        c = self._make("c", [f"z{i}" for i in range(3)])
+        pairs = kg.find_novel_pairs([a, b, c], max_pairs=10, min_papers_each=3)
+        # a-b: min=5, a-c: min=3, b-c: min=3
+        assert pairs[0].score == 5  # a-b 第一
+
+
+# ---------------------------------------------------------------------------
+# is_graph_sufficient
+# ---------------------------------------------------------------------------
+
+class TestIsGraphSufficient:
+    def test_meets_both_thresholds(self):
+        from darwinian.state import Entity, PaperInfo
+        entities = [Entity(canonical_name=f"e{i}", type="method", paper_ids=["p1"])
+                    for i in range(20)]
+        papers = [PaperInfo(paper_id=f"p{i}") for i in range(10)]
+        assert kg.is_graph_sufficient(entities, papers) is True
+
+    def test_fails_entities_threshold(self):
+        from darwinian.state import Entity, PaperInfo
+        entities = [Entity(canonical_name="e", type="method", paper_ids=["p1"])]
+        papers = [PaperInfo(paper_id=f"p{i}") for i in range(10)]
+        assert kg.is_graph_sufficient(entities, papers) is False
+
+    def test_fails_papers_threshold(self):
+        from darwinian.state import Entity, PaperInfo
+        entities = [Entity(canonical_name=f"e{i}", type="method", paper_ids=["p1"])
+                    for i in range(20)]
+        papers = [PaperInfo(paper_id="p1")]
+        assert kg.is_graph_sufficient(entities, papers) is False
+
+
+# ---------------------------------------------------------------------------
+# build_concept_graph orchestration（完全 mock）
+# ---------------------------------------------------------------------------
+
+class TestBuildConceptGraph:
+    def test_pipeline_end_to_end_mocked(self):
+        """不打真实 API/LLM，mock 掉 step 1/2/4，验证整条管道能拼出 ConceptGraph"""
+        fake_seeds = [{"paperId": "p1", "title": "T1", "abstract": "x" * 200, "citationCount": 50}]
+        fake_candidates_after_hop = fake_seeds  # expand_one_hop 返回原样
+        fake_llm = MagicMock()
+        fake_llm.invoke = MagicMock(return_value=MagicMock(content=(
+            '{"papers":[{"paper_id":"p1","method":["adam"],"dataset":["imagenet"],'
+            '"metric":[],"task_type":"classification","limitations":["slow convergence"]}]}'
+        )))
+
+        with patch("darwinian.tools.semantic_scholar.search_papers_two_tiered",
+                   return_value=fake_seeds):
+            with patch("darwinian.utils.knowledge_graph.expand_one_hop",
+                       return_value=fake_candidates_after_hop):
+                graph = kg.build_concept_graph(
+                    research_direction="test",
+                    core_problem="how to train fast",
+                    llm=fake_llm,
+                )
+
+        assert len(graph.papers) == 1 and graph.papers[0].paper_id == "p1"
+        assert any(e.canonical_name == "adam" for e in graph.entities)
+        assert len(graph.limitations) == 1
+        # 数据太少：is_sufficient 应为 False
+        assert graph.is_sufficient is False

@@ -16,14 +16,16 @@ import hashlib
 import json as _json
 import re
 import string
+from itertools import combinations
 from typing import Any, Iterable
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from darwinian.state import Entity, LimitationRef, PaperInfo
+from darwinian.state import ConceptGraph, Entity, EntityPair, LimitationRef, PaperInfo
 from darwinian.tools import semantic_scholar as ss
 from darwinian.utils.json_parser import parse_llm_json
 from darwinian.utils.llm_retry import invoke_with_retry
+from darwinian.utils.similarity import compute_cosine_similarity, get_text_embedding
 
 
 # ---------------------------------------------------------------------------
@@ -368,3 +370,167 @@ def _merge_containment(entities: list[Entity]) -> list[Entity]:
             i += 1
         merged.extend(alive)
     return merged
+
+
+# ---------------------------------------------------------------------------
+# Step 6: 实体相关性裁剪（TF-IDF + 频次兜底）
+# ---------------------------------------------------------------------------
+
+def rank_relevance_top_k(
+    entities: list[Entity],
+    core_problem: str,
+    top_by_relevance: int = 60,
+    top_by_popularity: int = 20,
+) -> list[Entity]:
+    """
+    从全体实体中挑出 ~70 个最该给 Agent 2 看的，避免 prompt 爆炸：
+      - top_by_relevance 个按 core_problem 的 TF-IDF 余弦相似度排序
+      - top_by_popularity 个按 paper_ids 数量降序（防止跨域冷门实体被 TF-IDF 误杀）
+      - 最终去重合并
+
+    Args:
+        entities: canonicalize_merge 的输出（全体实体）
+        core_problem: Agent 1 产出的核心问题文本
+        top_by_relevance: 按相关性挑多少个
+        top_by_popularity: 按热度兜底多少个
+
+    Returns:
+        精选实体列表（长度 ≤ top_by_relevance + top_by_popularity）
+    """
+    if not entities:
+        return []
+
+    core_vec = get_text_embedding(core_problem or "")
+
+    def _entity_text(e: Entity) -> str:
+        return " ".join([e.canonical_name, *e.aliases])
+
+    scored: list[tuple[float, Entity]] = []
+    for e in entities:
+        emb = get_text_embedding(_entity_text(e))
+        scored.append((compute_cosine_similarity(core_vec, emb), e))
+
+    scored.sort(key=lambda x: x[0], reverse=True)
+    by_relevance = [e for _, e in scored[:top_by_relevance]]
+
+    by_popularity = sorted(entities, key=lambda e: len(e.paper_ids), reverse=True)[:top_by_popularity]
+
+    # 合并去重（按 (type, canonical_name) 唯一键）
+    seen: set[tuple[str, str]] = set()
+    result: list[Entity] = []
+    for e in by_relevance + by_popularity:
+        key = (e.type, e.canonical_name)
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(e)
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Step 6.5: 共现矩阵找结构洞
+# ---------------------------------------------------------------------------
+
+def find_novel_pairs(
+    entities: list[Entity],
+    max_pairs: int = 10,
+    min_papers_each: int = 3,
+) -> list[EntityPair]:
+    """
+    在全体实体中找"高频但从未共现"的 pair——潜在的结构洞（Sakana/ResearchAgent 思路的轻量版）。
+
+    规则：
+      - 两端 entity 的 paper_ids 不得有交集（从未共现）
+      - 两端各自的 paper_ids 数量 ≥ min_papers_each（两端都成熟）
+      - score = min(len(a.paper_ids), len(b.paper_ids))  # 偏向两端都成熟的组合
+      - 按 score 降序取 top max_pairs
+
+    Note: 只在相同或不同 type 间都允许配对（method × dataset 也可以是结构洞）。
+    """
+    if not entities:
+        return []
+
+    candidates: list[tuple[int, Entity, Entity]] = []
+    for a, b in combinations(entities, 2):
+        if len(a.paper_ids) < min_papers_each or len(b.paper_ids) < min_papers_each:
+            continue
+        if set(a.paper_ids) & set(b.paper_ids):
+            continue   # 已经共现过
+        score = min(len(a.paper_ids), len(b.paper_ids))
+        candidates.append((score, a, b))
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    return [
+        EntityPair(entity_a=a.canonical_name, entity_b=b.canonical_name, score=s)
+        for s, a, b in candidates[:max_pairs]
+    ]
+
+
+# ---------------------------------------------------------------------------
+# 充分性判断
+# ---------------------------------------------------------------------------
+
+MIN_ENTITIES_FOR_HARD_CONSTRAINT = 20
+MIN_PAPERS_FOR_HARD_CONSTRAINT = 10
+
+
+def is_graph_sufficient(entities: list[Entity], papers: list[PaperInfo]) -> bool:
+    """
+    数据是否足够支撑 Agent 2 的硬约束。
+    不足时 hypothesis_generator 降级走老 prompt（不强制 cited_entity_names）。
+    """
+    return len(entities) >= MIN_ENTITIES_FOR_HARD_CONSTRAINT and len(papers) >= MIN_PAPERS_FOR_HARD_CONSTRAINT
+
+
+# ---------------------------------------------------------------------------
+# 顶层编排：一把梭构建 ConceptGraph
+# ---------------------------------------------------------------------------
+
+def build_concept_graph(
+    research_direction: str,
+    core_problem: str,
+    llm: Any,
+    *,
+    classic_limit: int = 20,
+    recent_limit: int = 20,
+    max_refs_per_paper: int = 30,
+    max_cits_per_paper: int = 30,
+    top_k_papers: int = 60,
+    batch_size: int = 8,
+    top_by_relevance: int = 60,
+    top_by_popularity: int = 20,
+    max_novel_pairs: int = 10,
+) -> ConceptGraph:
+    """
+    从 research_direction 开始，走完 step 1–6.5 的完整管道，产出 ConceptGraph。
+
+    每一步失败都降级（不抛异常），最终 is_sufficient 反映数据是否够硬约束。
+    """
+    # Step 1: 分两档检索
+    seeds = ss.search_papers_two_tiered(
+        research_direction,
+        classic_limit=classic_limit,
+        recent_limit=recent_limit,
+    )
+    # Step 2: 一跳扩展
+    candidates = expand_one_hop(seeds, max_refs_per_paper, max_cits_per_paper)
+    # Step 3: 清洗 + 剪枝
+    top_papers = filter_and_rank(candidates, top_k=top_k_papers)
+    # Step 4: 批量抽取
+    raw = batch_extract_entities(top_papers, llm, batch_size=batch_size)
+    # Step 5: canonical 合并
+    entities, limitations, paper_infos = canonicalize_merge(top_papers, raw)
+    # Step 6: 相关性裁剪
+    pruned = rank_relevance_top_k(entities, core_problem, top_by_relevance, top_by_popularity)
+    # Step 6.5: 结构洞
+    novel_pairs = find_novel_pairs(pruned, max_pairs=max_novel_pairs)
+    # 充分性
+    sufficient = is_graph_sufficient(pruned, paper_infos)
+
+    return ConceptGraph(
+        papers=paper_infos,
+        entities=pruned,
+        limitations=limitations,
+        novel_pair_hints=novel_pairs,
+        is_sufficient=sufficient,
+    )
