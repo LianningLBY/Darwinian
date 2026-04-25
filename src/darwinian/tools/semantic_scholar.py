@@ -184,6 +184,7 @@ def get_references(paper_id: str, limit: int = 30, fields: str = GRAPH_FIELDS) -
     获取某篇论文**引用的**论文列表（即 references，往前翻：这篇引了谁）。
 
     S2 响应结构：{"data": [{"citedPaper": {...}}, ...]}，此函数解包后直接返回 paper 字典列表。
+    论文无引用时 S2 会返 {"data": null} 而非空数组，已用 `or []` 防御。
     失败返回空列表。
     """
     data = _s2_get(
@@ -192,14 +193,16 @@ def get_references(paper_id: str, limit: int = 30, fields: str = GRAPH_FIELDS) -
     )
     if not data:
         return []
-    return [item.get("citedPaper") for item in data.get("data", []) if item.get("citedPaper")]
+    items = data.get("data") or []   # 防 {"data": null}
+    return [it.get("citedPaper") for it in items if isinstance(it, dict) and it.get("citedPaper")]
 
 
 def get_citations(paper_id: str, limit: int = 30, fields: str = GRAPH_FIELDS) -> list[dict]:
     """
     获取**引用这篇论文的**论文列表（即 citations，往后翻：谁引了这篇）。
 
-    S2 响应结构：{"data": [{"citingPaper": {...}}, ...]}。失败返回空列表。
+    S2 响应结构：{"data": [{"citingPaper": {...}}, ...]}，论文无 citation 时返
+    {"data": null}，已用 `or []` 防御。失败返回空列表。
     """
     data = _s2_get(
         f"/paper/{paper_id}/citations",
@@ -207,7 +210,8 @@ def get_citations(paper_id: str, limit: int = 30, fields: str = GRAPH_FIELDS) ->
     )
     if not data:
         return []
-    return [item.get("citingPaper") for item in data.get("data", []) if item.get("citingPaper")]
+    items = data.get("data") or []   # 防 {"data": null}
+    return [it.get("citingPaper") for it in items if isinstance(it, dict) and it.get("citingPaper")]
 
 
 def get_paper_details(paper_id: str, fields: str = GRAPH_FIELDS) -> dict | None:

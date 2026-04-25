@@ -67,6 +67,29 @@ class TestReferencesUnwrap:
             cits = ss.get_citations("root_id")
         assert cits == [{"paperId": "p3"}]
 
+    def test_references_handles_null_data(self):
+        """S2 论文无引用时返 {"data": null}——之前会炸 'NoneType not iterable'"""
+        with patch.object(ss, "_s2_get", return_value={"data": None}):
+            assert ss.get_references("paper_with_no_refs") == []
+
+    def test_citations_handles_null_data(self):
+        """同上，无 citation 的论文 S2 返 {"data": null}"""
+        with patch.object(ss, "_s2_get", return_value={"data": None}):
+            assert ss.get_citations("brand_new_paper") == []
+
+    def test_references_skips_non_dict_items(self):
+        """防御：data 数组里偶发 None 或非 dict 条目"""
+        fake = {"data": [
+            {"citedPaper": {"paperId": "p1"}},
+            None,
+            "garbage",
+            {"citedPaper": None},
+            {"citedPaper": {"paperId": "p2"}},
+        ]}
+        with patch.object(ss, "_s2_get", return_value=fake):
+            refs = ss.get_references("x")
+        assert [r["paperId"] for r in refs] == ["p1", "p2"]
+
 
 # ---------------------------------------------------------------------------
 # 分两档检索
