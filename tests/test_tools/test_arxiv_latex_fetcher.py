@@ -26,7 +26,11 @@ from darwinian.tools.arxiv_latex_fetcher import (
     render_for_llm,
     split_sections,
     _canonicalize_section_name,
+    _collect_tex_files,
+    _expand_inputs,
+    _extract_abstract,
     _extract_main_tex_from_archive,
+    _find_main_and_expand_inputs,
     _find_main_tex_in_tar,
 )
 
@@ -353,3 +357,220 @@ class TestRenderForLlm:
         out = render_for_llm(src, sections_to_include=["method", "experiments"])
         assert "## METHOD" in out
         assert "## EXPERIMENTS" not in out
+
+
+# ---------------------------------------------------------------------------
+# Hot-fix: 扩展 alias map（实跑 LayerSkip 发现的 gap）
+# ---------------------------------------------------------------------------
+
+class TestExpandedAliases:
+    """覆盖实跑 LayerSkip(2404.16710) 时发现的章节名 gap"""
+
+    def test_proposed_solution_maps_to_method(self):
+        assert _canonicalize_section_name("Proposed Solution") == "method"
+
+    def test_motivation_maps_to_introduction(self):
+        assert _canonicalize_section_name("Motivation") == "introduction"
+
+    def test_ablation_studies_maps_to_experiments(self):
+        assert _canonicalize_section_name("Ablation Studies") == "experiments"
+
+    def test_limitations_maps_to_conclusion(self):
+        assert _canonicalize_section_name("Limitations") == "conclusion"
+
+    def test_architecture_maps_to_method(self):
+        assert _canonicalize_section_name("Architecture") == "method"
+
+    def test_problem_statement_maps_to_introduction(self):
+        assert _canonicalize_section_name("Problem Statement") == "introduction"
+
+    def test_empirical_results_maps_to_experiments(self):
+        assert _canonicalize_section_name("Empirical Results") == "experiments"
+
+
+# ---------------------------------------------------------------------------
+# Hot-fix: \input{} 展开
+# ---------------------------------------------------------------------------
+
+class TestExpandInputs:
+    def test_simple_input_expansion(self):
+        files = {"abstract": "We present X.", "abstract.tex": "We present X."}
+        text = r"\begin{document}\input{abstract}\end{document}"
+        out = _expand_inputs(text, files, depth=5)
+        assert "We present X." in out
+        assert "\\input{abstract}" not in out
+
+    def test_input_with_tex_suffix(self):
+        files = {"section1.tex": "section content"}
+        text = r"\input{section1.tex}"
+        out = _expand_inputs(text, files, depth=5)
+        assert "section content" in out
+
+    def test_include_command(self):
+        """\\include{} 应该和 \\input{} 一样处理"""
+        files = {"chapter1": "chapter body", "chapter1.tex": "chapter body"}
+        text = r"\include{chapter1}"
+        out = _expand_inputs(text, files, depth=5)
+        assert "chapter body" in out
+
+    def test_nested_path(self):
+        """\\input{sections/abstract} 也能找到"""
+        files = {"sections/abstract.tex": "abstract body", "abstract.tex": "abstract body",
+                 "sections/abstract": "abstract body", "abstract": "abstract body"}
+        text = r"\input{sections/abstract}"
+        out = _expand_inputs(text, files, depth=5)
+        assert "abstract body" in out
+
+    def test_recursive_expansion(self):
+        """\\input{a} 内的 \\input{b} 也要展开"""
+        files = {
+            "a": r"a content \input{b}",
+            "a.tex": r"a content \input{b}",
+            "b": "b content",
+            "b.tex": "b content",
+        }
+        text = r"\input{a}"
+        out = _expand_inputs(text, files, depth=5)
+        assert "a content" in out
+        assert "b content" in out
+
+    def test_max_depth_prevents_infinite_loop(self):
+        """循环 \\input 时 depth 计数终止"""
+        files = {"a": r"\input{b}", "b": r"\input{a}"}
+        text = r"\input{a}"
+        # 不应死循环
+        out = _expand_inputs(text, files, depth=3)
+        assert isinstance(out, str)
+
+    def test_missing_input_kept_as_is(self):
+        """\\input{nonexistent} 找不到时保留原样"""
+        files = {"x": "x content"}
+        text = r"\input{nonexistent}"
+        out = _expand_inputs(text, files, depth=5)
+        assert r"\input{nonexistent}" in out
+
+
+class TestFindMainAndExpandInputs:
+    def test_main_file_with_input_inlined(self):
+        files = {
+            "main.tex": r"\documentclass{article}\begin{document}\input{abstract}\end{document}",
+            "main": "...",  # backup key
+            "abstract": r"\begin{abstract}We present X.\end{abstract}",
+            "abstract.tex": r"\begin{abstract}We present X.\end{abstract}",
+        }
+        out = _find_main_and_expand_inputs(files)
+        assert "We present X." in out
+        assert "\\documentclass" in out
+
+
+# ---------------------------------------------------------------------------
+# Hot-fix: 多种 abstract 模式
+# ---------------------------------------------------------------------------
+
+class TestExtractAbstract:
+    def test_standard_environment(self):
+        latex = r"\begin{abstract}Standard form.\end{abstract}"
+        assert _extract_abstract(latex) == "Standard form."
+
+    def test_starred_environment(self):
+        """\\begin{abstract*}（少数会议用）"""
+        latex = r"\begin{abstract*}Starred form.\end{abstract*}"
+        assert _extract_abstract(latex) == "Starred form."
+
+    def test_macro_form(self):
+        """\\abstract{...} 自定义宏"""
+        latex = r"\abstract{Macro form abstract.}"
+        assert _extract_abstract(latex) == "Macro form abstract."
+
+    def test_macro_with_nested_braces(self):
+        """\\abstract{} 内含嵌套 {} 时 balanced 匹配"""
+        latex = r"\abstract{Text with \emph{italic} inside.}"
+        out = _extract_abstract(latex)
+        assert "italic" in out
+        assert out.endswith("inside.")
+
+    def test_returns_empty_when_no_abstract(self):
+        latex = r"\section{Intro} no abstract here"
+        assert _extract_abstract(latex) == ""
+
+    def test_multiline_environment(self):
+        latex = """\\begin{abstract}
+        Line 1.
+        Line 2.
+        \\end{abstract}"""
+        out = _extract_abstract(latex)
+        assert "Line 1." in out and "Line 2." in out
+
+
+# ---------------------------------------------------------------------------
+# Hot-fix: 端到端验证 LayerSkip 风格输入
+# ---------------------------------------------------------------------------
+
+class TestEndToEndLayerSkipStyle:
+    """模拟 LayerSkip 论文（真实跑出问题的场景）：
+    - main.tex 里 \\input{abstract} 引用别的文件
+    - 章节名是 'Proposed Solution' / 'Motivation' / 'Ablation Studies'
+    """
+
+    def _build_layerskip_like_targz(self):
+        return _build_targz({
+            "main.tex": r"""
+\documentclass{article}
+\begin{document}
+\input{sections/abstract}
+\section{Introduction}
+intro body
+\section{Motivation}
+motiv body
+\section{Proposed Solution}
+proposed body
+\section{Experiments}
+exp body
+\section{Ablation Studies}
+ablation body
+\section{Conclusion}
+concl body
+\end{document}
+            """.strip(),
+            "sections/abstract.tex": r"\begin{abstract}LayerSkip abstract.\end{abstract}",
+        })
+
+    def test_layerskip_style_full_pipeline(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("darwinian.tools.semantic_scholar.CACHE_DIR", tmp_path)
+        monkeypatch.setattr(alf, "_MIN_INTERVAL", 0.0)
+
+        targz = self._build_layerskip_like_targz()
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.content = targz
+        resp.headers = {"content-type": "application/gzip"}
+        resp.raise_for_status = MagicMock()
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get = MagicMock(return_value=resp)
+
+        with patch("httpx.Client", return_value=client):
+            src = fetch_arxiv_latex("layerskip-test")
+
+        # 1. abstract 从子文件抽到（之前的 bug）
+        assert src.section("abstract") == "LayerSkip abstract."
+
+        # 2. "Proposed Solution" 现在归 method（之前是 other_）
+        assert "proposed body" in src.section("method")
+
+        # 3. "Motivation" 归 introduction
+        assert "motiv body" in src.section("introduction")
+
+        # 4. "Ablation Studies" 归 experiments
+        assert "ablation body" in src.section("experiments")
+
+        # 5. 没有 other_ 章节（除 acknowledgements / appendix 这种纯辅料）
+        other_keys = [k for k in src.sections if k.startswith("other_")]
+        # 这里的测试 input 没有真"其他"章节，应当 0 个
+        assert other_keys == []
+
+        # 6. render_for_llm 默认输出现在含 method 内容（之前空）
+        rendered = render_for_llm(src)
+        assert "proposed body" in rendered
+        assert "exp body" in rendered or "ablation body" in rendered

@@ -145,14 +145,14 @@ def fetch_arxiv_latex(arxiv_id: str) -> LatexSource | None:
 
 def _extract_main_tex_from_archive(content: bytes, content_type: str) -> str:
     """
-    从 arxiv e-print 返回的字节流里抽出主 .tex 文件。
+    从 arxiv e-print 返回的字节流里抽出主 .tex 文件，**自动展开 \\input{} 引用**。
 
     arxiv 返回类型多变：
-    - 多文件: .tar.gz （最常见，多 .tex + 图）
+    - 多文件: .tar.gz （最常见，多 .tex + 图，主文件 \\input 子文件）
     - 单文件: .tex.gz （直接是压缩的单 tex）
     - PDF-only: %PDF- 开头（没 LaTeX 源码的论文）
 
-    返回：主 .tex 文件的字符串内容；未找到返空。
+    返回：主 .tex 文件的字符串内容（含 \\input 子文件已内联）；未找到返空。
     """
     if not content:
         return ""
@@ -164,14 +164,16 @@ def _extract_main_tex_from_archive(content: bytes, content_type: str) -> str:
     # 尝试 tar.gz
     try:
         with tarfile.open(fileobj=io.BytesIO(content), mode="r:gz") as tar:
-            return _find_main_tex_in_tar(tar)
+            tex_files = _collect_tex_files(tar)
+            return _find_main_and_expand_inputs(tex_files)
     except (tarfile.ReadError, EOFError):
         pass
 
     # 尝试 tar（不压缩）
     try:
         with tarfile.open(fileobj=io.BytesIO(content), mode="r:") as tar:
-            return _find_main_tex_in_tar(tar)
+            tex_files = _collect_tex_files(tar)
+            return _find_main_and_expand_inputs(tex_files)
     except (tarfile.ReadError, EOFError):
         pass
 
@@ -179,7 +181,6 @@ def _extract_main_tex_from_archive(content: bytes, content_type: str) -> str:
     try:
         import gzip
         decompressed = gzip.decompress(content)
-        # 看是不是 LaTeX
         text = decompressed.decode("utf-8", errors="ignore")
         if "\\documentclass" in text or "\\begin{document}" in text:
             return text
@@ -197,32 +198,114 @@ def _extract_main_tex_from_archive(content: bytes, content_type: str) -> str:
     return ""
 
 
-def _find_main_tex_in_tar(tar: tarfile.TarFile) -> str:
-    """
-    在 tar 包里找主 .tex 文件——优先含 \\documentclass 或 \\begin{document}。
-
-    策略：
-    1. 收集所有 .tex 文件
-    2. 优先返回含 \\documentclass 的（顶级文档）
-    3. 如果只有一个 .tex 文件，直接返
-    4. 如果多个但都不含 \\documentclass，返第一个（兜底）
-    """
-    candidates: list[tuple[str, str]] = []   # (name, content)
-
+def _collect_tex_files(tar: tarfile.TarFile) -> dict[str, str]:
+    """读 tar 里所有 .tex 文件成 {basename: content}（兼容多种 \\input 路径写法）"""
+    files: dict[str, str] = {}
     for member in tar.getmembers():
         if not member.isfile():
             continue
-        name = member.name.lower()
-        if not name.endswith(".tex"):
+        name = member.name
+        if not name.lower().endswith(".tex"):
             continue
         try:
             f = tar.extractfile(member)
             if f is None:
                 continue
             text = f.read().decode("utf-8", errors="ignore")
-            candidates.append((member.name, text))
         except Exception:
             continue
+        # 同时存全路径和 basename 两种 key，方便 \input 查找
+        files[name] = text
+        basename = name.rsplit("/", 1)[-1]
+        if basename != name:
+            files[basename] = text
+        # 去 .tex 后缀的 key 也存（\input{abstract} 不带后缀的常见写法）
+        if basename.lower().endswith(".tex"):
+            files[basename[:-4]] = text
+        if name.lower().endswith(".tex"):
+            files[name[:-4]] = text
+    return files
+
+
+def _find_main_tex_in_tar(tar: tarfile.TarFile) -> str:
+    """
+    [兼容旧测试] 在 tar 包里找主 .tex 文件——优先含 \\documentclass 或 \\begin{document}。
+    新代码请用 _collect_tex_files + _find_main_and_expand_inputs。
+    """
+    files = _collect_tex_files(tar)
+    if not files:
+        return ""
+
+    # 优先含 documentclass 的
+    for name, text in files.items():
+        if "\\documentclass" in text:
+            return text
+    # 没有 documentclass 但有 \begin{document}
+    for name, text in files.items():
+        if "\\begin{document}" in text:
+            return text
+    # 兜底：第一个
+    return next(iter(files.values()))
+
+
+_INPUT_PATTERN = re.compile(r"\\(?:input|include)\{([^}]+)\}")
+
+
+def _find_main_and_expand_inputs(tex_files: dict[str, str], max_depth: int = 5) -> str:
+    """
+    从 .tex 文件集合里找主文件，递归展开 \\input{} / \\include{} 引用。
+
+    Args:
+        tex_files: _collect_tex_files 的输出（含原路径、basename、去后缀三种 key）
+        max_depth: 防 \\input 循环引用的递归深度上限
+
+    Returns:
+        主文件内容（子文件已内联），未找到返空
+    """
+    if not tex_files:
+        return ""
+
+    # 找主文件（优先含 \documentclass）
+    main_text = ""
+    for text in tex_files.values():
+        if "\\documentclass" in text:
+            main_text = text
+            break
+    if not main_text:
+        for text in tex_files.values():
+            if "\\begin{document}" in text:
+                main_text = text
+                break
+    if not main_text:
+        # 兜底：第一个 .tex 文件
+        main_text = next(iter(tex_files.values()))
+
+    # 递归展开 \input / \include
+    return _expand_inputs(main_text, tex_files, max_depth)
+
+
+def _expand_inputs(text: str, tex_files: dict[str, str], depth: int) -> str:
+    """递归把 \\input{name} / \\include{name} 替换成对应文件的内容"""
+    if depth <= 0:
+        return text
+
+    def _replace(match: re.Match) -> str:
+        target = match.group(1).strip()
+        # 试多种 key 形式
+        candidates = [target, f"{target}.tex"]
+        # 也试 basename
+        if "/" in target:
+            base = target.rsplit("/", 1)[-1]
+            candidates.append(base)
+            candidates.append(f"{base}.tex")
+        for cand in candidates:
+            if cand in tex_files:
+                # 递归展开嵌套 \input
+                return _expand_inputs(tex_files[cand], tex_files, depth - 1)
+        # 找不到：保留原样，让下游忽略
+        return match.group(0)
+
+    return _INPUT_PATTERN.sub(_replace, text)
 
     if not candidates:
         return ""
@@ -246,18 +329,83 @@ def _find_main_tex_in_tar(tar: tarfile.TarFile) -> str:
 # ---------------------------------------------------------------------------
 
 # 常见章节名 → 规范 key 的映射
+# 设计原则：覆盖 ML/NLP 顶会（NeurIPS/ICML/ACL/ICLR）论文的常见章节命名习惯
+# 历史 gap：实跑 LayerSkip(arxiv:2404.16710) 时发现 "Proposed Solution"、
+# "Motivation"、"Ablation Studies" 等常见章节没被识别 → 全部加入
 _SECTION_NAME_MAP = {
-    # canonical: [aliases (lowercased)]
+    # canonical: [aliases (lowercased, 去标点后)]
     "abstract": ["abstract"],
-    "introduction": ["introduction", "intro", "background"],
-    "related_work": ["related work", "related works", "prior work", "literature review"],
-    "method": ["method", "methods", "methodology", "approach", "our method",
-               "proposed method", "approach overview", "model"],
-    "experiments": ["experiments", "experiment", "evaluation", "results",
-                    "experimental results", "experimental setup", "experimental setting"],
-    "conclusion": ["conclusion", "conclusions", "discussion", "summary",
-                   "discussion and conclusion"],
+
+    "introduction": [
+        "introduction", "intro", "background", "preliminaries",
+        "motivation", "background and motivation", "problem statement",
+    ],
+
+    "related_work": [
+        "related work", "related works", "prior work", "literature review",
+        "previous work",
+    ],
+
+    "method": [
+        "method", "methods", "methodology", "approach", "our method",
+        "proposed method", "approach overview", "model",
+        "proposed solution", "proposed approach", "framework",
+        "design", "architecture", "our approach", "our framework",
+        "system design", "model architecture", "training",
+    ],
+
+    "experiments": [
+        "experiments", "experiment", "evaluation", "results",
+        "experimental results", "experimental setup", "experimental setting",
+        "ablation", "ablation study", "ablation studies",
+        "empirical evaluation", "empirical results", "empirical study",
+        "benchmarks", "benchmark results",
+    ],
+
+    "conclusion": [
+        "conclusion", "conclusions", "discussion", "summary",
+        "discussion and conclusion", "limitations", "limitation",
+        "future work", "broader impact",
+    ],
 }
+
+
+def _extract_abstract(latex_text: str) -> str:
+    """
+    依次尝试 3 种 LaTeX 论文常见的 abstract 写法：
+
+    1. \\begin{abstract}...\\end{abstract}             (NeurIPS/ICML/ACL 标准)
+    2. \\begin{abstract*}...\\end{abstract*}           (少数会议)
+    3. \\abstract{...}                                  (自定义宏，少见)
+
+    Returns: 抽到的 abstract 文本（去掉前后空白），未匹配返空字符串
+    """
+    # 模式 1+2: \begin{abstract[*]}...\end{abstract[*]}
+    m = re.search(
+        r"\\begin\{abstract\*?\}(.*?)\\end\{abstract\*?\}",
+        latex_text,
+        re.DOTALL,
+    )
+    if m:
+        return m.group(1).strip()
+
+    # 模式 3: \abstract{...}（balanced braces 比 .* 更稳）
+    abstract_macro = re.search(r"\\abstract\s*\{", latex_text)
+    if abstract_macro:
+        start = abstract_macro.end()
+        depth = 1
+        i = start
+        while i < len(latex_text) and depth > 0:
+            ch = latex_text[i]
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+            i += 1
+        if depth == 0:
+            return latex_text[start:i - 1].strip()
+
+    return ""
 
 
 def split_sections(latex_text: str) -> dict[str, str]:
@@ -267,18 +415,14 @@ def split_sections(latex_text: str) -> dict[str, str]:
     返回字典 keys 是规范化名（abstract/introduction/method/experiments/conclusion）。
     未识别的章节归入 "other_<原标题>"。
 
-    特殊处理 abstract：抽 \\begin{abstract}...\\end{abstract} 块。
+    特殊处理 abstract：依次尝试 3 种常见写法。
     """
     sections: dict[str, str] = {}
 
-    # ① 抽 abstract（\begin{abstract}...\end{abstract}）
-    abstract_match = re.search(
-        r"\\begin\{abstract\}(.*?)\\end\{abstract\}",
-        latex_text,
-        re.DOTALL,
-    )
-    if abstract_match:
-        sections["abstract"] = abstract_match.group(1).strip()
+    # ① 抽 abstract——按优先级尝试 3 种 LaTeX 写法
+    abstract_text = _extract_abstract(latex_text)
+    if abstract_text:
+        sections["abstract"] = abstract_text
 
     # ② 用 \section{...} / \section*{...} 切分正文
     # 找出所有 section 标记的位置 + 标题
