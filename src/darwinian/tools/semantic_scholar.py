@@ -219,6 +219,104 @@ def get_paper_details(paper_id: str, fields: str = GRAPH_FIELDS) -> dict | None:
     return _s2_get(f"/paper/{paper_id}", {"fields": fields})
 
 
+def get_paper_by_doi(doi: str, fields: str = GRAPH_FIELDS) -> dict | None:
+    """
+    通过 DOI 查 S2 论文详情。
+
+    S2 支持 paper_id 多种前缀：DOI、ARXIV、CorpusId 等。本函数封装 DOI 路径。
+    Endpoint: /paper/DOI:{doi}
+
+    Args:
+        doi: 不带任何前缀的纯 DOI（如 "10.18653/v1/2024.acl-main.123"）
+        fields: 逗号分隔字段
+
+    Returns:
+        paper dict 或 None（DOI 不存在 / 网络失败）
+    """
+    if not doi or not doi.strip():
+        return None
+    return _s2_get(f"/paper/DOI:{doi.strip()}", {"fields": fields})
+
+
+def batch_search(
+    queries: list[str],
+    limit_per_query: int = 10,
+    year: str | None = None,
+    fields: str = GRAPH_FIELDS,
+) -> list[list[dict]]:
+    """
+    批量搜索：对每个 query 调一次 search_papers，返回每个 query 的结果列表。
+
+    注意：这不是 S2 的"batch"端点（那个是按 paperId 批量），是多次 search 的循环。
+    每次调用之间有 _MIN_INTERVAL_SECONDS 节流，防触发 429。
+
+    Args:
+        queries: 多个查询关键词
+        limit_per_query: 每个 query 返回上限
+        year: 年份过滤，应用于所有 query
+        fields: 字段
+
+    Returns:
+        list[list[dict]] —— 与 queries 一一对应。失败的 query 返空 list 不抛错。
+    """
+    return [search_papers(q, limit=limit_per_query, year=year, fields=fields) for q in queries]
+
+
+def get_papers_batch(
+    paper_ids: list[str],
+    fields: str = GRAPH_FIELDS,
+) -> list[dict]:
+    """
+    S2 真正的 batch 接口：/paper/batch，单次 POST 拿多个 paper 详情，比循环 N 次省限速。
+
+    Args:
+        paper_ids: paper_id 列表（最多 500 个，超过 S2 会拒）
+        fields: 字段
+
+    Returns:
+        与 paper_ids 一一对应的 paper dict 列表（不存在的 id 对应位置为空 dict）
+
+    Note: S2 文档明确支持 paperIds 多种格式：原生 paperId、DOI:、ARXIV:、CorpusId: 等。
+    """
+    if not paper_ids:
+        return []
+
+    # 缓存命中检查（单 batch 整体缓存）
+    cache_k = _cache_key("/paper/batch", {"ids": ",".join(sorted(paper_ids)), "fields": fields})
+    cached = _cache_get(cache_k)
+    if cached is not None:
+        return cached
+
+    _respect_rate_limit()
+    try:
+        with httpx.Client(timeout=60.0) as client:
+            resp = client.post(
+                f"{SEMANTIC_SCHOLAR_BASE}/paper/batch",
+                params={"fields": fields},
+                json={"ids": paper_ids[:500]},
+                headers=_headers(),
+            )
+        if resp.status_code == 429:
+            time.sleep(_RETRY_AFTER_429_SECONDS)
+            _respect_rate_limit()
+            with httpx.Client(timeout=60.0) as client:
+                resp = client.post(
+                    f"{SEMANTIC_SCHOLAR_BASE}/paper/batch",
+                    params={"fields": fields},
+                    json={"ids": paper_ids[:500]},
+                    headers=_headers(),
+                )
+        resp.raise_for_status()
+        result = resp.json() or []
+    except Exception:
+        return []
+
+    # 防 list 里夹 None
+    cleaned = [item if isinstance(item, dict) else {} for item in result]
+    _cache_set(cache_k, cleaned)
+    return cleaned
+
+
 # ---------------------------------------------------------------------------
 # Legacy: v1 用的高级搜索（保留供 bottleneck_miner 现有代码兼容）
 # ---------------------------------------------------------------------------

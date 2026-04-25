@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from darwinian.agents.proposal_elaborator import (
+    elaborate_proposal,
     proposal_elaborator_node,
     _build_proposal,
     _validate,
@@ -23,10 +24,12 @@ from darwinian.agents.proposal_elaborator import (
 from darwinian.state import (
     AbstractionBranch,
     ConceptGraph,
+    Hypothesis,
     LimitationRef,
     MethodologyPhase,
     PaperInfo,
     ResearchProposal,
+    ResearchState,
 )
 
 
@@ -182,7 +185,7 @@ class TestValidateAllErrors:
 
 
 # ---------------------------------------------------------------------------
-# proposal_elaborator_node 端到端
+# elaborate_proposal 端到端（底层工具函数）
 # ---------------------------------------------------------------------------
 
 class TestElaboratorNode:
@@ -192,7 +195,7 @@ class TestElaboratorNode:
         fake_resp = MagicMock(content=_json.dumps(raw))
         with patch("darwinian.agents.proposal_elaborator.invoke_with_retry",
                    return_value=fake_resp):
-            proposal = proposal_elaborator_node(_skeleton(), graph, MagicMock())
+            proposal = elaborate_proposal(_skeleton(), graph, MagicMock())
         assert proposal is not None
         assert proposal.fits_resource_budget is True
         assert len(proposal.key_references) >= 5
@@ -218,7 +221,7 @@ class TestElaboratorNode:
         with patch("darwinian.agents.proposal_elaborator.invoke_with_retry",
                    side_effect=fake_invoke):
             with patch("time.sleep"):
-                proposal = proposal_elaborator_node(_skeleton(), graph, MagicMock())
+                proposal = elaborate_proposal(_skeleton(), graph, MagicMock())
         assert proposal is not None
         assert proposal.fits_resource_budget is True
         # 两次调用证明经历了反馈重试
@@ -234,7 +237,7 @@ class TestElaboratorNode:
         with patch("darwinian.agents.proposal_elaborator.invoke_with_retry",
                    return_value=fake_resp):
             with patch("time.sleep"):
-                proposal = proposal_elaborator_node(_skeleton(), graph, MagicMock())
+                proposal = elaborate_proposal(_skeleton(), graph, MagicMock())
         # 仍然返回（让调用方判断），不是 None
         assert proposal is not None
         # 故意保留错误的 reference 证明这是失败的产出（不是 None 也不是改对了）
@@ -251,5 +254,104 @@ class TestElaboratorNode:
         with patch("darwinian.agents.proposal_elaborator.invoke_with_retry",
                    return_value=fake_resp):
             with patch("time.sleep"):
-                proposal = proposal_elaborator_node(_skeleton(), graph, MagicMock())
+                proposal = elaborate_proposal(_skeleton(), graph, MagicMock())
         assert proposal is None
+
+
+# ---------------------------------------------------------------------------
+# proposal_elaborator_node (LangGraph wrapper)
+# ---------------------------------------------------------------------------
+
+class TestProposalElaboratorGraphNode:
+    """验证 graph wrapper 从 state 正确取材料、对每个 branch 调用底层函数、
+    把结果写回 state.research_proposals"""
+
+    def _state_with_n_branches(self, n: int):
+        graph = _graph_with_papers()
+        branches = [
+            AbstractionBranch(
+                name=f"B{i}",
+                description=f"branch {i}",
+                algorithm_logic="x",
+                math_formulation="y",
+                cited_entity_names=["adam", "resnet"],
+                solved_limitation_id="L001",
+            )
+            for i in range(n)
+        ]
+        h = Hypothesis(core_problem="cp", abstraction_tree=branches)
+        return ResearchState(research_direction="x", current_hypothesis=h, concept_graph=graph)
+
+    def test_calls_elaborate_for_each_branch(self):
+        """每个 branch 都调一次 elaborate_proposal"""
+        state = self._state_with_n_branches(3)
+        good_proposal = MagicMock(spec=ResearchProposal)
+        with patch("darwinian.agents.proposal_elaborator.elaborate_proposal",
+                   return_value=good_proposal) as mock_elab:
+            out = proposal_elaborator_node(state, MagicMock())
+        assert mock_elab.call_count == 3
+        assert len(out["research_proposals"]) == 3
+
+    def test_skips_failed_elaborations(self):
+        """部分 branch 返 None 不阻塞，已成功的仍写入"""
+        state = self._state_with_n_branches(3)
+        results = [MagicMock(spec=ResearchProposal), None, MagicMock(spec=ResearchProposal)]
+        call_idx = {"i": 0}
+
+        def fake_elab(*args, **kwargs):
+            r = results[call_idx["i"]]
+            call_idx["i"] += 1
+            return r
+
+        with patch("darwinian.agents.proposal_elaborator.elaborate_proposal",
+                   side_effect=fake_elab):
+            out = proposal_elaborator_node(state, MagicMock())
+        # 只有 2 个成功的进入结果
+        assert len(out["research_proposals"]) == 2
+
+    def test_no_hypothesis_returns_empty(self):
+        """current_hypothesis 为空时安全返空 list"""
+        state = ResearchState(research_direction="x")
+        with patch("darwinian.agents.proposal_elaborator.elaborate_proposal") as mock_elab:
+            out = proposal_elaborator_node(state, MagicMock())
+        assert mock_elab.call_count == 0
+        assert out["research_proposals"] == []
+
+    def test_no_concept_graph_returns_empty(self):
+        """concept_graph 为空时安全返空 list（不调底层函数）"""
+        h = Hypothesis(
+            core_problem="cp",
+            abstraction_tree=[AbstractionBranch(
+                name="B", description="x", algorithm_logic="x", math_formulation="x",
+            )],
+        )
+        state = ResearchState(research_direction="x", current_hypothesis=h, concept_graph=None)
+        with patch("darwinian.agents.proposal_elaborator.elaborate_proposal") as mock_elab:
+            out = proposal_elaborator_node(state, MagicMock())
+        assert mock_elab.call_count == 0
+        assert out["research_proposals"] == []
+
+    def test_passes_through_kwargs(self):
+        """gpu_hours_budget 和 target_venues 透传给底层函数"""
+        state = self._state_with_n_branches(1)
+        venues = [{"name": "NeurIPS 2026", "deadline": "2026-05-13"}]
+        with patch("darwinian.agents.proposal_elaborator.elaborate_proposal",
+                   return_value=None) as mock_elab:
+            proposal_elaborator_node(state, MagicMock(),
+                                      gpu_hours_budget=336, target_venues=venues)
+        kw = mock_elab.call_args.kwargs
+        assert kw["gpu_hours_budget"] == 336
+        assert kw["target_venues"] == venues
+
+    def test_state_can_accept_research_proposals_field(self):
+        """ResearchState.research_proposals 字段已加且接受 list[ResearchProposal]"""
+        state = ResearchState(research_direction="x")
+        # 默认空 list
+        assert state.research_proposals == []
+        # 能写入
+        graph = _graph_with_papers()
+        raw = _good_llm_response(graph)
+        proposal = _build_proposal(raw, _skeleton(), graph)
+        state2 = state.model_copy(update={"research_proposals": [proposal]})
+        assert len(state2.research_proposals) == 1
+        assert state2.research_proposals[0].title == "QuantSkip: Do Layers Tolerate ?"

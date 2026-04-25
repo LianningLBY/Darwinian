@@ -333,6 +333,14 @@ class ResearchState(BaseModel):
     # 当前假设
     current_hypothesis: Hypothesis | None = Field(default=None)
 
+    # Phase 1 v3：每个 abstraction_tree branch 对应展开的 ResearchProposal
+    # N:N 对齐——research_proposals[i] 对应 current_hypothesis.abstraction_tree[i]
+    # 由 proposal_elaborator_node 填充
+    research_proposals: list[ResearchProposal] = Field(
+        default_factory=list,
+        description="Phase 1 v3 产出：每个骨架展开的完整 proposal",
+    )
+
     # 理论审查结论
     critic_verdict: CriticVerdict | None = Field(default=None)
     critic_feedback: str = Field(default="", description="审查官的详细反馈")

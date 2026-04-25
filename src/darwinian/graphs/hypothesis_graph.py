@@ -32,6 +32,7 @@ from darwinian.agents.hypothesis_generator import (
     hypothesis_generator_node,
     DuplicateHypothesisError,
 )
+from darwinian.agents.proposal_elaborator import proposal_elaborator_node
 from darwinian.agents.theoretical_critic import theoretical_critic_node
 from darwinian.utils.similarity import get_text_embedding
 
@@ -167,12 +168,24 @@ def write_math_error_to_ledger(state: ResearchState) -> dict:
     }
 
 
-def build_hypothesis_graph(llm: BaseChatModel) -> StateGraph:
+def build_hypothesis_graph(
+    llm: BaseChatModel,
+    *,
+    elaborate_proposals: bool = False,
+    gpu_hours_budget: float = 168.0,
+    target_venues: list[dict] | None = None,
+) -> StateGraph:
     """
     构建 Phase 1 子图。
 
     Args:
         llm: 供所有 Agent 使用的 LLM 实例
+        elaborate_proposals: 若 True，在 hypothesis_generator 之后、theoretical_critic
+            之前插入 Agent 2.5 (proposal_elaborator)，把每个 branch 展开成完整
+            ResearchProposal。默认 False——展开会显著增加 LLM 调用成本（每 branch 一次），
+            主大循环建议关闭，只在 standalone "出 seed" 场景启用。
+        gpu_hours_budget: elaborate=True 时透传给 elaborator 校验 phase 总耗时
+        target_venues: elaborate=True 时透传给 elaborator 选 deadline
 
     Returns:
         编译后的 LangGraph 子图
@@ -190,8 +203,23 @@ def build_hypothesis_graph(llm: BaseChatModel) -> StateGraph:
     graph.add_edge(START, "preprocess")
     graph.add_edge("preprocess", "bottleneck_miner")
     graph.add_edge("bottleneck_miner", "hypothesis_generator")
-    graph.add_edge("hypothesis_generator", "theoretical_critic")
     graph.add_edge("write_math_error", "bottleneck_miner")
+
+    # 可选：Agent 2.5 proposal_elaborator
+    if elaborate_proposals:
+        graph.add_node(
+            "proposal_elaborator",
+            partial(
+                proposal_elaborator_node,
+                llm=llm,
+                gpu_hours_budget=gpu_hours_budget,
+                target_venues=target_venues,
+            ),
+        )
+        graph.add_edge("hypothesis_generator", "proposal_elaborator")
+        graph.add_edge("proposal_elaborator", "theoretical_critic")
+    else:
+        graph.add_edge("hypothesis_generator", "theoretical_critic")
 
     # 条件路由边
     graph.add_conditional_edges(

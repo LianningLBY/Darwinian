@@ -249,3 +249,123 @@ class TestS2Get429Retry:
             data = ss._s2_get("/cached", {"q": "z"})
         assert data == {"hit": True}
         assert mc.call_count == 0  # 没打 HTTP
+
+
+# ---------------------------------------------------------------------------
+# Tool 4: get_paper_by_doi / batch_search / get_papers_batch
+# ---------------------------------------------------------------------------
+
+class TestGetPaperByDoi:
+    def test_passes_doi_prefix(self):
+        """DOI 应被 /paper/DOI:{doi} 路径引用"""
+        with patch.object(ss, "_s2_get", return_value={"paperId": "abc"}) as mock_get:
+            paper = ss.get_paper_by_doi("10.18653/v1/2024.acl-main.123")
+        assert paper == {"paperId": "abc"}
+        endpoint = mock_get.call_args.args[0]
+        assert endpoint == "/paper/DOI:10.18653/v1/2024.acl-main.123"
+
+    def test_strips_whitespace(self):
+        with patch.object(ss, "_s2_get", return_value={"x": 1}) as mock_get:
+            ss.get_paper_by_doi("  10.18653/v1/y  ")
+        assert mock_get.call_args.args[0] == "/paper/DOI:10.18653/v1/y"
+
+    def test_empty_returns_none_no_call(self):
+        with patch.object(ss, "_s2_get") as mock_get:
+            assert ss.get_paper_by_doi("") is None
+            assert ss.get_paper_by_doi("   ") is None
+        assert mock_get.call_count == 0
+
+
+class TestBatchSearch:
+    def test_one_call_per_query(self):
+        with patch.object(ss, "search_papers", side_effect=[[{"id": 1}], [{"id": 2}]]) as mock:
+            out = ss.batch_search(["query A", "query B"])
+        assert mock.call_count == 2
+        assert out == [[{"id": 1}], [{"id": 2}]]
+
+    def test_year_param_propagates(self):
+        with patch.object(ss, "search_papers", return_value=[]) as mock:
+            ss.batch_search(["x"], year="2023-2026")
+        assert mock.call_args.kwargs["year"] == "2023-2026"
+
+    def test_empty_queries_returns_empty(self):
+        with patch.object(ss, "search_papers") as mock:
+            assert ss.batch_search([]) == []
+        assert mock.call_count == 0
+
+
+class TestGetPapersBatch:
+    def _resp(self, status, json_body=None):
+        r = MagicMock()
+        r.status_code = status
+        r.json = MagicMock(return_value=json_body if json_body is not None else [])
+        if status >= 400:
+            r.raise_for_status = MagicMock(side_effect=Exception(f"HTTP {status}"))
+        else:
+            r.raise_for_status = MagicMock()
+        return r
+
+    def _client(self, response):
+        c = MagicMock()
+        c.__enter__ = MagicMock(return_value=c)
+        c.__exit__ = MagicMock(return_value=False)
+        c.post = MagicMock(return_value=response)
+        return c
+
+    def test_empty_ids_returns_empty(self):
+        with patch("httpx.Client") as mc:
+            assert ss.get_papers_batch([]) == []
+        assert mc.call_count == 0
+
+    def test_success_returns_list(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        client = self._client(self._resp(200, [{"paperId": "p1"}, {"paperId": "p2"}]))
+        with patch("httpx.Client", return_value=client):
+            out = ss.get_papers_batch(["p1", "p2"])
+        assert len(out) == 2
+        assert out[0]["paperId"] == "p1"
+
+    def test_replaces_none_with_empty_dict(self, tmp_path, monkeypatch):
+        """S2 batch 偶尔返 None（id 不存在），转成空 dict 占位"""
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        client = self._client(self._resp(200, [{"paperId": "p1"}, None, {"paperId": "p3"}]))
+        with patch("httpx.Client", return_value=client):
+            out = ss.get_papers_batch(["p1", "bad", "p3"])
+        assert out == [{"paperId": "p1"}, {}, {"paperId": "p3"}]
+
+    def test_cache_hit_skips_http(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        cached = [{"paperId": "p1"}]
+        cache_k = ss._cache_key("/paper/batch", {"ids": "p1", "fields": ss.GRAPH_FIELDS})
+        ss._cache_set(cache_k, cached)
+        with patch("httpx.Client") as mc:
+            out = ss.get_papers_batch(["p1"])
+        assert out == cached
+        assert mc.call_count == 0
+
+    def test_429_then_success(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_RETRY_AFTER_429_SECONDS", 0.0)
+        responses = [self._resp(429), self._resp(200, [{"paperId": "p1"}])]
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.post = MagicMock(side_effect=responses)
+        with patch("httpx.Client", return_value=client):
+            out = ss.get_papers_batch(["p1"])
+        assert out == [{"paperId": "p1"}]
+
+    def test_truncates_above_500(self, tmp_path, monkeypatch):
+        """S2 限制 ≤ 500 paperIds，超过会被静默截断"""
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        ids = [f"p{i}" for i in range(600)]
+        client = self._client(self._resp(200, [{"paperId": f"p{i}"} for i in range(500)]))
+        with patch("httpx.Client", return_value=client):
+            ss.get_papers_batch(ids)
+        sent = client.post.call_args.kwargs["json"]
+        assert len(sent["ids"]) == 500
