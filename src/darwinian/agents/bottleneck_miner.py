@@ -183,7 +183,8 @@ def _format_entities(graph: ConceptGraph, max_per_type: int = 15) -> str:
         by_type.setdefault(e.type, []).append(e)
 
     lines: list[str] = []
-    for etype in ["method", "dataset", "metric", "task_type"]:
+    # task_type 是 PaperInfo 属性，不是 Entity，不进入实体表展示
+    for etype in ["method", "dataset", "metric"]:
         group = by_type.get(etype, [])
         group.sort(key=lambda e: len(e.paper_ids), reverse=True)
         lines.append(f"\n[{etype}] ({len(group)} 个)")

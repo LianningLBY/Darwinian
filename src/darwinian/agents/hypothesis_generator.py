@@ -227,7 +227,8 @@ def _render_entities_by_type(graph: ConceptGraph, max_per_type: int = 20) -> str
     for e in graph.entities:
         by_type.setdefault(e.type, []).append(e)
     lines = []
-    for etype in ["method", "dataset", "metric", "task_type"]:
+    # task_type 是 PaperInfo 属性，不是 Entity，不在实体表里展示
+    for etype in ["method", "dataset", "metric"]:
         group = sorted(by_type.get(etype, []), key=lambda e: len(e.paper_ids), reverse=True)
         lines.append(f"\n  [{etype}] ({len(group)} 个)")
         for e in group[:max_per_type]:

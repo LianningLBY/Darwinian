@@ -284,9 +284,9 @@ class TestCanonicalizeMerge:
         entities, _, _ = kg.canonicalize_merge(self._papers(), raw)
         methods = [e for e in entities if e.type == "method"]
         assert len(methods) == 1
-        # canonical 保留较长的（是长串的 canonical_name）
-        assert methods[0].canonical_name == "adam optimizer"
-        assert "adam" in methods[0].aliases
+        # canonical 保留**短**名（符合 prompt "最短通用名" 约定），长名进 aliases
+        assert methods[0].canonical_name == "adam"
+        assert "adam optimizer" in methods[0].aliases
         assert set(methods[0].paper_ids) == {"p1", "p2"}
 
     def test_bertopic_not_merged_with_bert(self):

@@ -83,6 +83,11 @@ def _safe_hypothesis_generator(state: ResearchState, llm: BaseChatModel) -> dict
             # 从方案名中提取关键词，避免下一轮重复选择同一方向
             import re as _re
             banned_kw = [w for w in _re.findall(r"[a-z\u4e00-\u9fff]{3,}", text.lower())][:5]
+            # v2: \u628a\u6bcf\u4e2a branch \u7684 cited_entity_names \u4e5f\u52a0\u8fdb\u53bb\u2014\u2014
+            # \u8fd9\u4e9b\u662f\u7cbe\u786e\u672f\u8bed\uff0c\u6bd4\u6b63\u5219\u63d0\u53d6\u7684\u788e\u7247\u6709\u7528\u5f97\u591a
+            for branch in hypothesis.abstraction_tree:
+                banned_kw.extend(branch.cited_entity_names)
+            banned_kw = list(dict.fromkeys(banned_kw))[:15]   # \u53bb\u91cd\u4fdd\u5e8f\uff0c\u6700\u591a 15 \u4e2a
 
         record = FailedRecord(
             feature_vector=feature_vector,

@@ -373,8 +373,9 @@ def canonicalize_merge(
 def _merge_containment(entities: list[Entity]) -> list[Entity]:
     """
     同类型内按 canonical_name 长度升序遍历。
-    若 short 作为完整词出现在 long 里（且类型相同），把 short 并入 long，short 名字进 long.aliases。
-    被并入的 short 从结果中移除。
+    若 short 作为完整词出现在 long 里（且类型相同），把 long 并入 short——
+    保留**短**名字做 canonical（符合 batch 抽取 prompt "用最短通用英文名"约定），
+    long 的原 canonical 进 short.aliases。被并入的 long 从结果中移除。
     """
     by_type: dict[str, list[Entity]] = {}
     for e in entities:
@@ -382,32 +383,32 @@ def _merge_containment(entities: list[Entity]) -> list[Entity]:
 
     merged: list[Entity] = []
     for etype, group in by_type.items():
-        # 按长度升序，短的先被考察
+        # 按长度升序，短的先被考察。对每个 short 尝试找一个能合并它的 long
         group.sort(key=lambda e: len(e.canonical_name))
         alive = list(group)
         i = 0
         while i < len(alive):
             short = alive[i]
-            target_idx = -1
+            target_long_idx = -1
             for j in range(i + 1, len(alive)):
                 long = alive[j]
                 if _word_boundary_contains(short.canonical_name, long.canonical_name):
-                    target_idx = j
+                    target_long_idx = j
                     break
-            if target_idx >= 0:
-                tgt = alive[target_idx]
-                # short 的 aliases + canonical_name 并入 long
-                combined_aliases = set(tgt.aliases) | set(short.aliases) | {short.canonical_name}
-                combined_paper_ids = set(tgt.paper_ids) | set(short.paper_ids)
-                alive[target_idx] = Entity(
-                    canonical_name=tgt.canonical_name,
-                    aliases=sorted(combined_aliases - {tgt.canonical_name}),
-                    type=tgt.type,
+            if target_long_idx >= 0:
+                long = alive[target_long_idx]
+                # long 的 aliases + canonical 并入 short
+                combined_aliases = set(short.aliases) | set(long.aliases) | {long.canonical_name}
+                combined_paper_ids = set(short.paper_ids) | set(long.paper_ids)
+                alive[i] = Entity(
+                    canonical_name=short.canonical_name,    # 保留**短**名做 canonical
+                    aliases=sorted(combined_aliases - {short.canonical_name}),
+                    type=short.type,
                     paper_ids=sorted(combined_paper_ids),
                 )
-                # short 移除
-                alive.pop(i)
-                # 不自增 i，继续考察新位置
+                # 移除 long
+                alive.pop(target_long_idx)
+                # i 不动，继续在合并后的 short 上看有没有更多 long 能并
                 continue
             i += 1
         merged.extend(alive)
