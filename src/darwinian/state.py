@@ -143,9 +143,82 @@ class MethodologyPhase(BaseModel):
     expected_compute_hours: float = Field(default=0.0, description="估计耗时（GPU 小时）")
 
 
+class QuantitativeClaim(BaseModel):
+    """从论文里抽取的单个精确定量结果"""
+    metric_name: str = Field(description="指标名，如 'speedup' / 'PPL' / 'top-1 accuracy'")
+    metric_value: str = Field(description="精确值，如 '2.16-2.62x' / '5.54' / '85.3%'")
+    setting: str = Field(default="", description="模型 + benchmark 上下文，如 'Llama-3.1-8B on MATH'")
+
+
+class PaperEvidence(BaseModel):
+    """
+    从单篇论文抽取的"五元组+"，用于 ResearchProposal 的研究现状/Why Now/key references。
+
+    设计目标：让 elaborator 能写出 "DEL (COLM 2025, 2.16-2.62x)" 这种带具体数字 + 出处
+    的 grounded 引用，不再泛泛说"已有方法效果不佳"。
+    """
+    paper_id: str = Field(description="arxiv:2404.16710 / s2:xxxxx 形式")
+    title: str = Field(default="")
+    short_name: str = Field(
+        default="",
+        description="论文/方法的口语化简称，如 'LayerSkip' / 'DEL' / 'QSpec'。"
+                    "用于 ResearchProposal.key_references_formatted 的 'Name: Full title' 格式",
+    )
+    venue: str = Field(default="", description="发表会议/期刊，如 'ACL 2024' / 'arxiv preprint'")
+    year: int = Field(default=0)
+    category: str = Field(
+        default="",
+        description="本论文所属研究类别，如 'Layer-skipping self-speculative methods'。"
+                    "供 elaborator 在研究现状里按类别分组",
+    )
+    method_names: list[str] = Field(
+        default_factory=list,
+        description="论文提出/使用的方法名（method 实体）",
+    )
+    datasets: list[str] = Field(default_factory=list)
+    metrics: list[str] = Field(default_factory=list, description="评估指标名（不带数值）")
+    quantitative_claims: list[QuantitativeClaim] = Field(
+        default_factory=list,
+        description="精确定量结果列表。这是 motivation/why_now 引用的弹药",
+    )
+    headline_result: str = Field(
+        default="",
+        description="一句话核心数据，用于 '研究现状' 里的简短引用，如 '2.16-2.62x speedup'",
+    )
+    limitations: list[str] = Field(default_factory=list, description="论文承认的局限")
+    relation_to_direction: str = Field(
+        default="",
+        description="本论文与当前研究方向的关系。"
+                    "枚举值: 'extends' / 'baseline' / 'inspires' / 'orthogonal' / 'reproduces'",
+    )
+    full_text_used: bool = Field(
+        default=False,
+        description="True=抽取自全文 LaTeX；False=仅 abstract（精度会低）",
+    )
+
+
+class ResourceEstimate(BaseModel):
+    """三种执行模式的资源估算"""
+    auto_research: dict = Field(
+        default_factory=dict,
+        description="纯 AI 自动模式: {'gpu_hours': X, 'usd_cost': Y, 'wall_clock_days': Z}",
+    )
+    human_in_loop: dict = Field(
+        default_factory=dict,
+        description="HITL 模式: AI 主导但研究者每天监督 ~1 小时",
+    )
+    manual: dict = Field(
+        default_factory=dict,
+        description="人工纯手做模式（用于对比，体现 AI 加速）",
+    )
+
+
 class ResearchProposal(BaseModel):
     """
     Phase 1 v3 产出：从 AbstractionBranch 骨架展开的完整研究 proposal。
+
+    设计目标：对齐 QuantSkip 风格 markdown 模板（标题/状态/种子/描述/核心问题/
+    Why Now/方法思路/研究现状/目标 venue/关键参考/资源预估）。
 
     设计借鉴 HKUDS AI-Researcher 论文（NeurIPS 2025, arxiv:2505.18705）的
     6-section schema 思想 + Darwinian 自有的 ConceptGraph grounding。
@@ -153,29 +226,41 @@ class ResearchProposal(BaseModel):
     # ---- 链接回骨架 ----
     skeleton: AbstractionBranch = Field(description="生成本提案的骨架 branch")
 
+    # ---- 元数据（用于序列化成 markdown 模板）----
+    status: str = Field(default="draft", description="状态: draft/under_review/approved/rejected")
+    level: str = Field(default="", description="级别标签，如 'top-tier' / 'workshop'")
+    seed: str = Field(default="", description="生成本提案时的输入约束原文，便于追溯")
+    created_at: str = Field(default="", description="ISO 时间戳，由 elaborator 填")
+
     # ---- 标题与电梯演讲 ----
     title: str = Field(description="标题，含子问题，如 'X: Do Y also imply Z?'")
     elevator_pitch: str = Field(description="200 字左右的方案描述")
 
     # ---- 6-section 内容（顺序借鉴 HKUDS）----
-    challenges: str = Field(description="该方向的核心挑战")
-    existing_methods: str = Field(description="现有方法 + 局限性，按类别组织")
-    motivation: str = Field(
-        description="为什么现在做。必须引用 ≥3 个 ConceptGraph 里的 quantitative_claims",
+    challenges: str = Field(default="", description="该方向的核心挑战")
+    existing_methods: str = Field(
+        default="",
+        description="现有方法分类组织。Markdown 格式，每类用 '**Category**: paper1, paper2...'，"
+                    "末尾必须有 '**The gap**: ...' 段落。供研究现状 section 用",
     )
-    proposed_method: str = Field(description="提出的方法概览")
-    technical_details: str = Field(description="技术细节（公式、关键算法）")
+    motivation: str = Field(
+        default="",
+        description="为什么现在做。必须引用 ≥3 个具体定量数据 (quantitative_claims)",
+    )
+    proposed_method: str = Field(default="", description="提出的方法概览")
+    technical_details: str = Field(default="", description="技术细节（公式、关键算法）")
     expected_outcomes: str = Field(
+        default="",
         description="预期结果。必须包含'正反两种结果都可发表'的 framing",
     )
 
     # ---- Phased methodology（Darwinian 自创）----
     methodology_phases: list[MethodologyPhase] = Field(
         default_factory=list,
-        description="3-4 个执行阶段。phases 的 expected_compute_hours 总和必须 ≤ seed.gpu_hours_budget",
+        description="3-4 个执行阶段。phases 的 expected_compute_hours 总和必须 ≤ gpu_hours_budget",
     )
     total_estimated_hours: float = Field(default=0.0)
-    fits_resource_budget: bool = Field(default=False, description="是否满足 seed 资源约束")
+    fits_resource_budget: bool = Field(default=False, description="是否满足资源约束")
 
     # ---- Target venue ----
     target_venue: str = Field(default="", description="主要目标 venue（如 'NeurIPS 2026'）")
@@ -185,7 +270,18 @@ class ResearchProposal(BaseModel):
     # ---- Key references ----
     key_references: list[str] = Field(
         default_factory=list,
-        description="关键引用 paperId 列表。每个必须存在于 ConceptGraph.papers",
+        description="paperId 列表（追溯/查重用）。每个必须存在于 ConceptGraph.papers",
+    )
+    key_references_formatted: list[str] = Field(
+        default_factory=list,
+        description="QuantSkip 风格的 markdown 列表项，如 'LayerSkip: Enabling Early Exit "
+                    "Inference and Self-Speculative Decoding (ACL 2024)'。直接渲染到模板",
+    )
+
+    # ---- 资源预估（三种模式）----
+    resource_estimate: ResourceEstimate = Field(
+        default_factory=ResourceEstimate,
+        description="auto / human_in_loop / manual 三种执行模式的资源估算",
     )
 
 
