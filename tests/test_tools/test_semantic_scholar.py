@@ -131,3 +131,98 @@ class TestApiKey:
     def test_headers_with_key(self, monkeypatch):
         monkeypatch.setenv("SEMANTIC_SCHOLAR_API_KEY", "k_xyz")
         assert ss._headers() == {"x-api-key": "k_xyz"}
+
+
+# ---------------------------------------------------------------------------
+# Rate limiter + 429 重试
+# ---------------------------------------------------------------------------
+
+class TestRateLimiter:
+    def test_respects_min_interval(self, monkeypatch):
+        """连续两次调用必须间隔 >= _MIN_INTERVAL_SECONDS"""
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.05)
+        monkeypatch.setattr(ss, "_LAST_REQUEST_TIME", 0.0)
+        import time as _t
+        ss._respect_rate_limit()
+        t1 = _t.time()
+        ss._respect_rate_limit()
+        t2 = _t.time()
+        assert (t2 - t1) >= 0.04   # 留点余量
+
+    def test_first_call_no_wait(self, monkeypatch):
+        """首次调用（_LAST_REQUEST_TIME=0）不应阻塞"""
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 100.0)
+        monkeypatch.setattr(ss, "_LAST_REQUEST_TIME", 0.0)
+        import time as _t
+        t0 = _t.time()
+        ss._respect_rate_limit()
+        assert (_t.time() - t0) < 0.01
+
+
+class TestS2Get429Retry:
+    def _mock_client_with_responses(self, responses):
+        """构造一个 httpx.Client mock，依次返回 responses 列表里的 Response"""
+        fake_client = MagicMock()
+        fake_client.__enter__ = MagicMock(return_value=fake_client)
+        fake_client.__exit__ = MagicMock(return_value=False)
+        fake_client.get = MagicMock(side_effect=responses)
+        return fake_client
+
+    def _resp(self, status, json_body=None):
+        """模拟 httpx Response：所有 4xx/5xx 都会让 raise_for_status() 抛（与真 httpx 行为一致）"""
+        r = MagicMock()
+        r.status_code = status
+        r.json = MagicMock(return_value=json_body or {})
+        if status >= 400:
+            r.raise_for_status = MagicMock(side_effect=Exception(f"HTTP {status}"))
+        else:
+            r.raise_for_status = MagicMock()
+        return r
+
+    def test_success_first_try(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_RETRY_AFTER_429_SECONDS", 0.0)
+        client = self._mock_client_with_responses([self._resp(200, {"data": [1]})])
+        with patch("httpx.Client", return_value=client):
+            data = ss._s2_get("/x", {"q": "test"})
+        assert data == {"data": [1]}
+        assert client.get.call_count == 1
+
+    def test_429_then_success_retries(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_RETRY_AFTER_429_SECONDS", 0.0)
+        client = self._mock_client_with_responses([
+            self._resp(429),
+            self._resp(200, {"ok": True}),
+        ])
+        with patch("httpx.Client", return_value=client):
+            data = ss._s2_get("/x", {"q": "y"})
+        assert data == {"ok": True}
+        assert client.get.call_count == 2
+
+    def test_429_twice_gives_up(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_RETRY_AFTER_429_SECONDS", 0.0)
+        client = self._mock_client_with_responses([
+            self._resp(429),
+            self._resp(429),
+        ])
+        with patch("httpx.Client", return_value=client):
+            data = ss._s2_get("/x", {"q": "z"})
+        assert data is None
+        # 两次 attempt 都打了
+        assert client.get.call_count == 2
+
+    def test_cache_hit_skips_rate_limit_and_http(self, tmp_path, monkeypatch):
+        """缓存命中时既不应打 HTTP 也不应等限流"""
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 100.0)
+        # 预存一份缓存
+        ss._cache_set(ss._cache_key("/cached", {"q": "z"}), {"hit": True})
+        with patch("httpx.Client") as mc:
+            data = ss._s2_get("/cached", {"q": "z"})
+        assert data == {"hit": True}
+        assert mc.call_count == 0  # 没打 HTTP

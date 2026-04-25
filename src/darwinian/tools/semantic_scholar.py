@@ -31,9 +31,25 @@ GRAPH_FIELDS = "paperId,title,abstract,year,citationCount,externalIds"
 CACHE_DIR = Path(os.environ.get("DARWINIAN_S2_CACHE_DIR", ".cache/s2"))
 CACHE_TTL_SECONDS = int(os.environ.get("DARWINIAN_S2_CACHE_TTL", 7 * 24 * 3600))
 
+# S2 introductory rate plan: 1 req/s cumulative across all endpoints.
+# 默认 1.1s 留 10% buffer，DARWINIAN_S2_MIN_INTERVAL 可覆盖（如有更高 plan）
+_MIN_INTERVAL_SECONDS = float(os.environ.get("DARWINIAN_S2_MIN_INTERVAL", "1.1"))
+_LAST_REQUEST_TIME: float = 0.0
+# 429 时的退避：sleep 指定秒后重试一次，再失败就放弃
+_RETRY_AFTER_429_SECONDS = 5.0
+
 
 def _api_key() -> str | None:
     return os.environ.get("SEMANTIC_SCHOLAR_API_KEY")
+
+
+def _respect_rate_limit() -> None:
+    """阻塞到与上次 S2 请求间隔 >= _MIN_INTERVAL_SECONDS。"""
+    global _LAST_REQUEST_TIME
+    elapsed = time.time() - _LAST_REQUEST_TIME
+    if elapsed < _MIN_INTERVAL_SECONDS:
+        time.sleep(_MIN_INTERVAL_SECONDS - elapsed)
+    _LAST_REQUEST_TIME = time.time()
 
 
 def _headers() -> dict[str, str]:
@@ -73,7 +89,13 @@ def _cache_set(key: str, value: Any) -> None:
 
 def _s2_get(endpoint: str, params: dict[str, Any], *, use_cache: bool = True) -> dict | None:
     """
-    统一 GET 封装：缓存 → 请求 → 回写缓存。
+    统一 GET 封装：缓存 → 限流 → 请求 → 回写缓存。
+
+    限流：每次实际 HTTP 请求前确保距上次 S2 请求 >= _MIN_INTERVAL_SECONDS（默认 1.1s）。
+    缓存命中不计入限流。
+
+    429 处理：检测到 429 后 sleep _RETRY_AFTER_429_SECONDS（默认 5s）重试一次，再失败放弃。
+
     失败返回 None（调用方决定降级）。
     """
     if use_cache:
@@ -81,17 +103,27 @@ def _s2_get(endpoint: str, params: dict[str, Any], *, use_cache: bool = True) ->
         if cached is not None:
             return cached
 
-    try:
-        with httpx.Client(timeout=30.0) as client:
-            resp = client.get(
-                f"{SEMANTIC_SCHOLAR_BASE}{endpoint}",
-                params=params,
-                headers=_headers(),
-            )
+    for attempt in range(2):  # 最多 1 次 429 重试
+        _respect_rate_limit()
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                resp = client.get(
+                    f"{SEMANTIC_SCHOLAR_BASE}{endpoint}",
+                    params=params,
+                    headers=_headers(),
+                )
+            if resp.status_code == 429 and attempt == 0:
+                # 限流碰撞，退避后再试一次
+                print(f"[s2] 429 命中，{_RETRY_AFTER_429_SECONDS}s 后重试...")
+                time.sleep(_RETRY_AFTER_429_SECONDS)
+                continue
             resp.raise_for_status()
             data = resp.json()
-    except Exception:
-        return None
+        except Exception:
+            return None
+        break
+    else:
+        return None  # 两次都 429
 
     if use_cache:
         _cache_set(_cache_key(endpoint, params), data)
