@@ -133,6 +133,62 @@ class ConceptGraph(BaseModel):
         return None
 
 
+class MethodologyPhase(BaseModel):
+    """ResearchProposal 里的一个执行阶段"""
+    phase_number: int = Field(description="阶段序号 (1, 2, 3, 4)")
+    name: str = Field(description="阶段名（如 'Dual-metric profiling'）")
+    description: str = Field(description="阶段详细描述（多句）")
+    inputs: list[str] = Field(default_factory=list, description="本阶段输入")
+    outputs: list[str] = Field(default_factory=list, description="本阶段产物")
+    expected_compute_hours: float = Field(default=0.0, description="估计耗时（GPU 小时）")
+
+
+class ResearchProposal(BaseModel):
+    """
+    Phase 1 v3 产出：从 AbstractionBranch 骨架展开的完整研究 proposal。
+
+    设计借鉴 HKUDS AI-Researcher 论文（NeurIPS 2025, arxiv:2505.18705）的
+    6-section schema 思想 + Darwinian 自有的 ConceptGraph grounding。
+    """
+    # ---- 链接回骨架 ----
+    skeleton: AbstractionBranch = Field(description="生成本提案的骨架 branch")
+
+    # ---- 标题与电梯演讲 ----
+    title: str = Field(description="标题，含子问题，如 'X: Do Y also imply Z?'")
+    elevator_pitch: str = Field(description="200 字左右的方案描述")
+
+    # ---- 6-section 内容（顺序借鉴 HKUDS）----
+    challenges: str = Field(description="该方向的核心挑战")
+    existing_methods: str = Field(description="现有方法 + 局限性，按类别组织")
+    motivation: str = Field(
+        description="为什么现在做。必须引用 ≥3 个 ConceptGraph 里的 quantitative_claims",
+    )
+    proposed_method: str = Field(description="提出的方法概览")
+    technical_details: str = Field(description="技术细节（公式、关键算法）")
+    expected_outcomes: str = Field(
+        description="预期结果。必须包含'正反两种结果都可发表'的 framing",
+    )
+
+    # ---- Phased methodology（Darwinian 自创）----
+    methodology_phases: list[MethodologyPhase] = Field(
+        default_factory=list,
+        description="3-4 个执行阶段。phases 的 expected_compute_hours 总和必须 ≤ seed.gpu_hours_budget",
+    )
+    total_estimated_hours: float = Field(default=0.0)
+    fits_resource_budget: bool = Field(default=False, description="是否满足 seed 资源约束")
+
+    # ---- Target venue ----
+    target_venue: str = Field(default="", description="主要目标 venue（如 'NeurIPS 2026'）")
+    target_deadline: str = Field(default="", description="ISO 日期，如 '2026-05-13'")
+    fallback_venue: str = Field(default="", description="备选 venue，如时间不够")
+
+    # ---- Key references ----
+    key_references: list[str] = Field(
+        default_factory=list,
+        description="关键引用 paperId 列表。每个必须存在于 ConceptGraph.papers",
+    )
+
+
 class AbstractionBranch(BaseModel):
     """单个抽象方案分支"""
     name: str = Field(description="方案名称")
