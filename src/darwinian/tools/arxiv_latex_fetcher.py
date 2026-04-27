@@ -307,22 +307,6 @@ def _expand_inputs(text: str, tex_files: dict[str, str], depth: int) -> str:
 
     return _INPUT_PATTERN.sub(_replace, text)
 
-    if not candidates:
-        return ""
-
-    # 优先含 documentclass 的
-    for _, text in candidates:
-        if "\\documentclass" in text:
-            return text
-
-    # 没有 documentclass 但有 \begin{document}
-    for _, text in candidates:
-        if "\\begin{document}" in text:
-            return text
-
-    # 兜底：第一个 .tex
-    return candidates[0][1]
-
 
 # ---------------------------------------------------------------------------
 # 章节切分

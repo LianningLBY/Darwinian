@@ -106,19 +106,17 @@ class TestBucketByYear:
         amap = {"p1": "2202.0001", "p2": "2304.0001", "p3": "2503.0001", "p4": "2603.0001"}
         b = _bucket_by_year(papers, amap)
         assert "foundational_pre_2024" in b
-        assert "hot_2025_2026" in b
+        assert "hot_2024_2026" in b
         assert "arxiv:2202.0001" in b["foundational_pre_2024"]
         assert "arxiv:2304.0001" in b["foundational_pre_2024"]
-        assert "arxiv:2503.0001" in b["hot_2025_2026"]
-        assert "arxiv:2603.0001" in b["hot_2025_2026"]
+        assert "arxiv:2503.0001" in b["hot_2024_2026"]
+        assert "arxiv:2603.0001" in b["hot_2024_2026"]
 
-    def test_2024_falls_in_neither_bucket(self):
-        """2024 是过渡年，不归 pre_2024 也不归 hot_2025_2026"""
+    def test_2024_in_hot_bucket(self):
+        """Bug 1 fix: 2024 必须进 hot 桶（爆发年，LayerSkip / EAGLE-2 都是这年）"""
         papers = [_mk_paper("p1", year=2024)]
         b = _bucket_by_year(papers, {"p1": "2404.0001"})
-        # 2024 既不是 < 2024 也不是 >= 2025 → 不进任何桶
-        all_ids = [pid for pids in b.values() for pid in pids]
-        assert "arxiv:2404.0001" not in all_ids
+        assert "arxiv:2404.0001" in b["hot_2024_2026"]
 
     def test_year_zero_skipped(self):
         """year=0 表示未知 → 不进任何桶"""
@@ -128,9 +126,9 @@ class TestBucketByYear:
         assert "s2:p1" not in all_ids
 
     def test_empty_buckets_dropped(self):
-        """全部论文都在 2024 → 返回空 dict（无桶）"""
-        papers = [_mk_paper("p1", year=2024)]
-        b = _bucket_by_year(papers, {"p1": "2404.0001"})
+        """所有 paper year=0 → 两个桶都空 → 返回空 dict"""
+        papers = [_mk_paper("p1", year=0), _mk_paper("p2", year=0)]
+        b = _bucket_by_year(papers, {"p1": "", "p2": ""})
         assert b == {}
 
 
@@ -284,7 +282,9 @@ class TestBuildMaterialPack:
             ),
         ]
 
-        with patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
+        with patch("darwinian.agents.phase_a_orchestrator.build_seed_pool",
+                   return_value=[]) as mock_seed, \
+             patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
                    return_value=mock_graph) as mock_bg, \
              patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
                    side_effect=[
@@ -301,26 +301,30 @@ class TestBuildMaterialPack:
                 top_k_evidence=12,
             )
 
-        # 1. concept_graph 被 build_concept_graph 调一次
+        # 1. build_seed_pool 调一次（Scheme X 路径）
+        assert mock_seed.call_count == 1
+        # 2. concept_graph 调一次，且 seed_pool 透传
         assert mock_bg.call_count == 1
-        # 2. get_paper_details 调 2 次（每个 top paper 一次）
+        assert mock_bg.call_args.kwargs["seed_pool"] == []
+        # 3. get_paper_details 调 2 次（每个 top paper 一次）
         assert mock_gd.call_count == 2
-        # 3. batch_extract_evidence 调 1 次，第一个参数是 list[dict]
+        # 4. batch_extract_evidence 调 1 次
         assert mock_ext.call_count == 1
-        call_kwargs = mock_ext.call_args
-        papers_arg = call_kwargs.args[0]
+        papers_arg = mock_ext.call_args.args[0]
         assert len(papers_arg) == 2
         assert papers_arg[0]["paper_id"] == "arxiv:2404.16710"
         assert papers_arg[0]["title"] == "LayerSkip"
 
-        # 4. 装配的 ResearchMaterialPack
+        # 5. 装配的 ResearchMaterialPack
         assert pack.direction == "LLM inference acceleration"
         assert pack.constraints.gpu_hours_budget == 672.0
         assert len(pack.paper_evidence) == 2
         assert pack.concept_graph is mock_graph
-        assert pack.structural_hole_hooks == []   # 留给后续
-        # timeline_signals: LayerSkip 2024 不进桶；DEL 2025 进 hot_2025_2026
-        assert pack.timeline_signals == {"hot_2025_2026": ["arxiv:2510.del"]}
+        assert pack.structural_hole_hooks == []
+        # timeline_signals: LayerSkip 2024 + DEL 2025 都在 hot_2024_2026
+        assert pack.timeline_signals == {
+            "hot_2024_2026": ["arxiv:2404.16710", "arxiv:2510.del"]
+        }
 
     def test_top_k_truncation(self):
         """top_k_evidence 截断按 citation_count 排序"""
@@ -330,7 +334,9 @@ class TestBuildMaterialPack:
         ]
         mock_graph = ConceptGraph(papers=mock_papers)
 
-        with patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
+        with patch("darwinian.agents.phase_a_orchestrator.build_seed_pool",
+                   return_value=[]), \
+             patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
                    return_value=mock_graph), \
              patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
                    return_value={"externalIds": {}}), \
@@ -351,7 +357,9 @@ class TestBuildMaterialPack:
     def test_empty_graph_still_returns_valid_pack(self):
         """build_concept_graph 返空（如 S2 全挂）时 orchestrator 不崩"""
         empty_graph = ConceptGraph()
-        with patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
+        with patch("darwinian.agents.phase_a_orchestrator.build_seed_pool",
+                   return_value=[]), \
+             patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
                    return_value=empty_graph), \
              patch("darwinian.agents.phase_a_orchestrator.batch_extract_evidence",
                    return_value=[]):
@@ -502,47 +510,263 @@ class TestExpandSearchQueries:
         assert qs == []
 
 
-class TestOrchestratorPassesExtraQueries:
-    """end-to-end 验证：orchestrator 调 _expand_search_queries 后把结果传给 build_concept_graph"""
+# Note: TestOrchestratorPassesExtraQueries 已删除——orchestrator 改走 Scheme X
+# (build_seed_pool) 后不再调 _expand_search_queries / extra_queries 路径。
+# extra_queries 参数仍保留在 build_concept_graph，作为 v3 query expansion
+# 替代方案的备用入口（schema 稳定但 orchestrator 默认不用）。
+# 单测保留 TestExpandSearchQueries（_expand_search_queries 单元行为）。
 
-    def test_extra_queries_threaded_through(self):
-        # mock LLM 返 3 条 query
+
+# ===========================================================================
+# Scheme X: build_seed_pool + verify/recover + rerank
+# ===========================================================================
+
+from darwinian.agents.phase_a_orchestrator import (
+    _llm_list_seed_papers,
+    _verify_and_recover_seed,
+    _title_similarity,
+    _expand_seeds_one_hop,
+    _rerank_by_direction_relevance,
+    build_seed_pool,
+)
+from darwinian.tools.semantic_scholar import GRAPH_FIELDS
+
+
+class TestTitleSimilarity:
+    def test_identical(self):
+        assert _title_similarity("LayerSkip Early Exit", "LayerSkip Early Exit") == 1.0
+
+    def test_case_and_punct_insensitive(self):
+        a = "LayerSkip: Enabling Early Exit Inference"
+        b = "layerskip enabling early exit inference"
+        assert _title_similarity(a, b) > 0.9
+
+    def test_subset_overlap(self):
+        a = "LayerSkip: Enabling Early Exit Inference and Self-Speculative Decoding"
+        b = "LayerSkip: Enabling Early Exit Inference"
+        # 子集 → Jaccard ~ 0.7
+        assert 0.4 < _title_similarity(a, b) < 0.9
+
+    def test_completely_different(self):
+        assert _title_similarity("LayerSkip", "GPT-3 Few-Shot") == 0.0
+
+    def test_empty(self):
+        assert _title_similarity("", "anything") == 0.0
+        assert _title_similarity("anything", "") == 0.0
+
+
+class TestLlmListSeedPapers:
+    def test_happy_path(self):
         fake_resp = MagicMock(content=_json.dumps({
-            "queries": ["self-speculative decoding", "Medusa EAGLE", "mixed precision LLM"]
+            "seed_papers": [
+                {"arxiv_id": "2404.16710", "title": "LayerSkip", "reason": "..."},
+                {"arxiv_id": "2510.del", "title": "DEL", "reason": "..."},
+            ]
         }))
-        # mock build_concept_graph 返空 graph
-        empty_graph = ConceptGraph()
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp):
+            seeds = _llm_list_seed_papers("LLM speculative decoding", MagicMock())
+        assert len(seeds) == 2
+        assert seeds[0]["arxiv_id"] == "2404.16710"
+
+    def test_filters_entries_without_arxiv_id(self):
+        fake_resp = MagicMock(content=_json.dumps({
+            "seed_papers": [
+                {"arxiv_id": "2404.16710", "title": "ok"},
+                {"title": "no arxiv id"},   # missing arxiv_id → filter
+                {"arxiv_id": "", "title": "empty"},   # empty arxiv_id → filter
+                "not a dict",
+            ]
+        }))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp):
+            seeds = _llm_list_seed_papers("x", MagicMock())
+        assert len(seeds) == 1
+
+    def test_llm_failure_returns_empty(self):
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   side_effect=ConnectionError("net")):
+            assert _llm_list_seed_papers("x", MagicMock()) == []
+
+
+class TestVerifyAndRecoverSeed:
+    def test_arxiv_id_direct_hit(self):
+        cand = {"arxiv_id": "2404.16710", "title": "LayerSkip"}
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value={"paperId": "S2_HEX", "title": "LayerSkip"}) as mock_gd:
+            result = _verify_and_recover_seed(cand)
+        mock_gd.assert_called_once_with("ArXiv:2404.16710", fields=GRAPH_FIELDS)
+        assert result["paperId"] == "S2_HEX"
+
+    def test_arxiv_id_strip_prefix(self):
+        """LLM 可能加 'arxiv:' / 'ArXiv:' 前缀，要去掉"""
+        cand = {"arxiv_id": "arxiv:2404.16710", "title": "x"}
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value={"paperId": "ok"}) as mock_gd:
+            _verify_and_recover_seed(cand)
+        # 实际传给 S2 的 ID 不该重复 'ArXiv:' 前缀
+        called_id = mock_gd.call_args.args[0]
+        assert called_id == "ArXiv:2404.16710"
+
+    def test_title_fallback_when_arxiv_id_fails(self):
+        """arxiv_id verify 失败 → 用 title fuzzy 搜回捞（threshold > 0.85，标题需高度一致）"""
+        cand = {"arxiv_id": "2404.99999",
+                "title": "LayerSkip Enabling Early Exit Inference"}
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value=None), \
+             patch("darwinian.agents.phase_a_orchestrator.search_papers",
+                   return_value=[
+                       {"paperId": "WRONG", "title": "Completely unrelated paper"},
+                       # 标题完全一致 → similarity = 1.0
+                       {"paperId": "RIGHT",
+                        "title": "LayerSkip Enabling Early Exit Inference"},
+                   ]) as mock_search:
+            result = _verify_and_recover_seed(cand)
+        mock_search.assert_called_once()
+        assert result["paperId"] == "RIGHT"
+
+    def test_title_fallback_no_match(self):
+        """title 搜返回结果但相似度都 < 0.85 → 返 None"""
+        cand = {"arxiv_id": "2404.99999", "title": "LayerSkip"}
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value=None), \
+             patch("darwinian.agents.phase_a_orchestrator.search_papers",
+                   return_value=[{"paperId": "X", "title": "GPT-3"}]):
+            assert _verify_and_recover_seed(cand) is None
+
+    def test_no_arxiv_id_no_title_returns_none(self):
+        assert _verify_and_recover_seed({}) is None
+
+    def test_s2_exception_swallowed(self):
+        cand = {"arxiv_id": "2404.16710", "title": "x"}
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   side_effect=ConnectionError("net")), \
+             patch("darwinian.agents.phase_a_orchestrator.search_papers",
+                   side_effect=ConnectionError("net")):
+            assert _verify_and_recover_seed(cand) is None
+
+
+class TestExpandSeedsOneHop:
+    def test_collects_refs_and_cits(self):
+        seeds = [{"paperId": "S1"}]
+        refs = [{"paperId": "R1"}, {"paperId": "R2"}]
+        cits = [{"paperId": "C1"}]
+        with patch("darwinian.agents.phase_a_orchestrator.get_references",
+                   return_value=refs), \
+             patch("darwinian.agents.phase_a_orchestrator.get_citations",
+                   return_value=cits):
+            pool = _expand_seeds_one_hop(seeds, 5, 5)
+        # seeds + refs + cits, 全去重
+        ids = {p["paperId"] for p in pool}
+        assert ids == {"S1", "R1", "R2", "C1"}
+
+    def test_dedupe_across_seeds(self):
+        seeds = [{"paperId": "S1"}, {"paperId": "S2"}]
+        with patch("darwinian.agents.phase_a_orchestrator.get_references",
+                   return_value=[{"paperId": "OVERLAP"}]), \
+             patch("darwinian.agents.phase_a_orchestrator.get_citations",
+                   return_value=[]):
+            pool = _expand_seeds_one_hop(seeds, 5, 5)
+        # OVERLAP 在 S1 和 S2 的 refs 都出现，应去重为 1
+        ids = [p["paperId"] for p in pool]
+        assert ids.count("OVERLAP") == 1
+
+    def test_s2_failure_swallowed(self):
+        seeds = [{"paperId": "S1"}]
+        with patch("darwinian.agents.phase_a_orchestrator.get_references",
+                   side_effect=ConnectionError("net")), \
+             patch("darwinian.agents.phase_a_orchestrator.get_citations",
+                   side_effect=ConnectionError("net")):
+            pool = _expand_seeds_one_hop(seeds, 5, 5)
+        # seed 自己仍在
+        assert len(pool) == 1
+        assert pool[0]["paperId"] == "S1"
+
+
+class TestRerankByDirectionRelevance:
+    def test_seeds_rank_above_non_seeds(self):
+        papers = [
+            {"paperId": "NON_SEED", "title": "transformer language model",
+             "abstract": "general work", "citationCount": 99999},
+            {"paperId": "SEED", "title": "speculative decoding draft model",
+             "abstract": "matches direction", "citationCount": 50},
+        ]
+        seed_ids = {"SEED"}
+        ranked = _rerank_by_direction_relevance(
+            papers, "speculative decoding LLM", seed_ids,
+        )
+        assert ranked[0]["paperId"] == "SEED"
+
+    def test_relevance_above_citation_within_non_seeds(self):
+        """两个都不是 seed 时，TF-IDF 高的（与 direction 相似）排前"""
+        papers = [
+            {"paperId": "GENERIC", "title": "transformer",
+             "abstract": "BERT large model", "citationCount": 100000},
+            {"paperId": "RELEVANT", "title": "speculative decoding",
+             "abstract": "draft model verification", "citationCount": 50},
+        ]
+        ranked = _rerank_by_direction_relevance(
+            papers, "speculative decoding draft", set(),
+        )
+        assert ranked[0]["paperId"] == "RELEVANT"
+
+
+class TestBuildSeedPool:
+    def test_full_pipeline(self):
+        """build_seed_pool 端到端：mock 4 个内部依赖"""
+        # mock LLM 列 2 个 seed
+        fake_resp = MagicMock(content=_json.dumps({
+            "seed_papers": [
+                {"arxiv_id": "2404.16710", "title": "LayerSkip"},
+                {"arxiv_id": "2510.x", "title": "DEL"},
+            ]
+        }))
+        # mock S2 verify
+        s2_details = {
+            "ArXiv:2404.16710": {"paperId": "S2_LS", "title": "LayerSkip"},
+            "ArXiv:2510.x": {"paperId": "S2_DEL", "title": "DEL"},
+        }
+        # mock 一跳扩展
+        refs_by_id = {
+            "S2_LS": [{"paperId": "REF1", "title": "speculative ref"}],
+            "S2_DEL": [{"paperId": "REF2", "title": "draft model ref"}],
+        }
+
+        def mock_gd(pid, fields=None):
+            return s2_details.get(pid)
+        def mock_refs(pid, limit=8):
+            return refs_by_id.get(pid, [])
 
         with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
                    return_value=fake_resp), \
-             patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
-                   return_value=empty_graph) as mock_bg, \
-             patch("darwinian.agents.phase_a_orchestrator.batch_extract_evidence",
+             patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   side_effect=mock_gd), \
+             patch("darwinian.agents.phase_a_orchestrator.get_references",
+                   side_effect=mock_refs), \
+             patch("darwinian.agents.phase_a_orchestrator.get_citations",
                    return_value=[]):
-            build_research_material_pack(
-                direction="LLM inference acceleration",
-                constraints=_constraints(),
-                extractor_llm=MagicMock(), evidence_llm=MagicMock(),
-            )
-        # build_concept_graph 应收到 extra_queries
-        assert mock_bg.call_count == 1
-        kw = mock_bg.call_args.kwargs
-        assert kw["extra_queries"] == ["self-speculative decoding",
-                                        "Medusa EAGLE", "mixed precision LLM"]
+            pool = build_seed_pool("LLM speculative decoding", MagicMock(),
+                                    n_seeds=2, refs_per_seed=8, cits_per_seed=8)
+        # 应包含 2 个 seed + 2 个 ref，全去重
+        ids = {p["paperId"] for p in pool}
+        assert ids == {"S2_LS", "S2_DEL", "REF1", "REF2"}
 
-    def test_query_expansion_failure_does_not_block(self):
-        """LLM 调失败时 extra_queries=[]，但管线继续走"""
-        empty_graph = ConceptGraph()
+    def test_empty_when_no_seeds_verified(self):
+        """LLM 列 seed 但 S2 全 verify 失败"""
+        fake_resp = MagicMock(content=_json.dumps({
+            "seed_papers": [{"arxiv_id": "fake.id", "title": "fake"}]
+        }))
         with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
-                   side_effect=ConnectionError("net")), \
-             patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
-                   return_value=empty_graph) as mock_bg, \
-             patch("darwinian.agents.phase_a_orchestrator.batch_extract_evidence",
+                   return_value=fake_resp), \
+             patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value=None), \
+             patch("darwinian.agents.phase_a_orchestrator.search_papers",
                    return_value=[]):
-            build_research_material_pack(
-                direction="x", constraints=_constraints(),
-                extractor_llm=MagicMock(), evidence_llm=MagicMock(),
-            )
-        # 仍然调 build_concept_graph，extra_queries 是空列表（不是 None，方便后续判断）
-        assert mock_bg.call_count == 1
-        assert mock_bg.call_args.kwargs["extra_queries"] == []
+            pool = build_seed_pool("x", MagicMock())
+        assert pool == []
+
+    def test_llm_failure_returns_empty(self):
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   side_effect=ConnectionError("net")):
+            pool = build_seed_pool("x", MagicMock())
+        assert pool == []

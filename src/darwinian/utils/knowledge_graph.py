@@ -558,6 +558,7 @@ def build_concept_graph(
     max_novel_pairs: int = 10,
     backend: str | None = None,
     extra_queries: list[str] | None = None,
+    seed_pool: list[dict] | None = None,
 ) -> ConceptGraph:
     """
     从 research_direction 开始，走完 step 1–6.5 的完整管道，产出 ConceptGraph。
@@ -573,9 +574,27 @@ def build_concept_graph(
                  通过几条更具体的子查询（如 'self-speculative decoding draft model'）
                  把方向论文喂进 candidate pool。每条独立调 search_papers_two_tiered，
                  结果按 paperId 去重后并入 seeds。None 或空列表时无影响。
+        seed_pool: Scheme X 路径 —— 已经预先准备好的候选论文池（list of S2-style dicts），
+                 含 paperId/title/abstract/year/citationCount/externalIds。
+                 提供时**完全跳过 search + filter_and_rank**，直接用这批 paper 走
+                 entity 抽取 + 结构洞 pipeline。用于 build_seed_pool 这种用 LLM 知识
+                 列 seed 后做一跳扩展再 rerank 的高质量候选场景。
+                 注意：seed_pool 提供时 backend / extra_queries 被忽略。
     """
     if backend is None:
         backend = os.environ.get("DARWINIAN_SEARCH_BACKEND", "s2").lower()
+
+    # Scheme X 路径：seed_pool 已预先准备好，跳过 search + filter_and_rank
+    if seed_pool is not None:
+        top_papers = seed_pool[:top_k_papers]
+        # 跳过 candidate-level 操作，直接进 entity 抽取
+        return _build_graph_from_papers(
+            top_papers, core_problem, llm,
+            batch_size=batch_size,
+            top_by_relevance=top_by_relevance,
+            top_by_popularity=top_by_popularity,
+            max_novel_pairs=max_novel_pairs,
+        )
 
     # Step 1 + Step 2（视 backend 而定）
     if backend == "arxiv":
@@ -614,22 +633,42 @@ def build_concept_graph(
 
     # Step 3: 清洗 + 剪枝
     top_papers = filter_and_rank(candidates, top_k=top_k_papers)
-    # Step 4: 批量抽取
+    # Step 4-6.5 抽取实体 + 结构洞
+    return _build_graph_from_papers(
+        top_papers, core_problem, llm,
+        batch_size=batch_size,
+        top_by_relevance=top_by_relevance,
+        top_by_popularity=top_by_popularity,
+        max_novel_pairs=max_novel_pairs,
+        # arxiv 模式无 citation graph，候选池较稀疏，结构洞阈值降到 2
+        pair_min_papers=2 if backend == "arxiv" else 3,
+    )
+
+
+def _build_graph_from_papers(
+    top_papers: list[dict],
+    core_problem: str,
+    llm: Any,
+    *,
+    batch_size: int = 8,
+    top_by_relevance: int = 60,
+    top_by_popularity: int = 20,
+    max_novel_pairs: int = 10,
+    pair_min_papers: int = 3,
+) -> ConceptGraph:
+    """
+    从已经准备好的 paper 列表构建 ConceptGraph（Steps 4-6.5）。
+
+    供 build_concept_graph 内部复用，也供 Scheme X 路径直接复用——
+    seed_pool 跳过 search + filter_and_rank 后从这里继续。
+    """
     raw = batch_extract_entities(top_papers, llm, batch_size=batch_size)
-    # Step 5: canonical 合并
     entities, limitations, paper_infos = canonicalize_merge(top_papers, raw)
-    # Step 6: 相关性裁剪
     pruned = rank_relevance_top_k(entities, core_problem, top_by_relevance, top_by_popularity)
-    # Step 6.5: 结构洞
-    # arxiv 模式无 citation graph，候选池只有 ~40 篇，实体出现频次稀疏 ——
-    # 沿用默认阈值 3 会找不到任何 pair，降到 2 才能让弱信号浮出
-    pair_min_papers = 2 if backend == "arxiv" else 3
     novel_pairs = find_novel_pairs(
         pruned, max_pairs=max_novel_pairs, min_papers_each=pair_min_papers,
     )
-    # 充分性
     sufficient = is_graph_sufficient(pruned, paper_infos)
-
     return ConceptGraph(
         papers=paper_infos,
         entities=pruned,

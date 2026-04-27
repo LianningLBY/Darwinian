@@ -34,10 +34,206 @@ from darwinian.state import (
 )
 from darwinian.tools.arxiv_latex_fetcher import fetch_arxiv_latex, render_for_llm
 from darwinian.tools.paper_evidence_extractor import batch_extract_evidence
-from darwinian.tools.semantic_scholar import get_paper_details
+from darwinian.tools.semantic_scholar import (
+    GRAPH_FIELDS,
+    get_citations,
+    get_paper_details,
+    get_references,
+    search_papers,
+)
 from darwinian.utils.json_parser import parse_llm_json
 from darwinian.utils.llm_retry import invoke_with_retry
-from darwinian.utils.knowledge_graph import build_concept_graph
+from darwinian.utils.knowledge_graph import build_concept_graph, _dedup_papers_by_id
+from darwinian.utils.similarity import compute_cosine_similarity, get_text_embedding
+
+
+# ===========================================================================
+# Scheme X: build_seed_pool —— LLM 列方向 seed → S2 verify → 一跳 → rerank
+# 替换 S2 keyword search 路径，从根上解决 candidate pool 缺方向论文的问题
+# ===========================================================================
+
+_LLM_SEED_PROMPT = """你是科研助理。给定一个研究方向，请列出该方向**最重要**的 12-18 篇论文 seed
+（必须是真实存在的、已发表/arxiv 可查的论文），每篇含 arxiv_id + 完整 title + 一句话理由。
+
+输出严格 JSON：
+{
+  "seed_papers": [
+    {"arxiv_id": "2404.16710", "title": "LayerSkip: Enabling Early Exit Inference and Self-Speculative Decoding", "reason": "..."},
+    ...
+  ]
+}
+
+【关键约束】
+1. arxiv_id 形如 'YYMM.NNNNN'（如 '2404.16710'），不带 v1/v2 后缀，不带 'arxiv:' 前缀
+2. title 写**完整官方标题**（含子标题），用于 fallback verify
+3. 优先选近 2 年（2024-2026）方向核心工作，配少量 2-3 年内基础工作
+4. 覆盖该方向不同子赛道（如 speculative decoding 含 LayerSkip / DEL / Medusa / EAGLE / QSpec / SpecInfer / Sequoia 等）
+5. 不要列基础工作如 GPT-3 / Llama 2 / PyTorch（除非它们就是方向本身）
+6. 列 12-18 篇，宁缺勿滥
+
+输出严格 JSON，不要 markdown 包裹。
+"""
+
+
+def build_seed_pool(
+    direction: str,
+    llm: BaseChatModel,
+    *,
+    n_seeds: int = 15,
+    refs_per_seed: int = 8,
+    cits_per_seed: int = 8,
+    final_pool_size: int = 50,
+) -> list[dict]:
+    """
+    Scheme X 主入口。返回 list of S2-style paper dict（含 paperId/title/abstract/year/
+    citationCount/externalIds），可直接喂给 build_concept_graph(seed_pool=...)。
+
+    流程：
+      1. LLM 列 N 个 seed (arxiv_id + title + reason)
+      2. 对每个 seed：先 S2 verify by arxiv_id；失败则用 title fuzzy match 回捞
+      3. 对验证通过的 seeds：调 get_references / get_citations 一跳扩展
+      4. 按 (is_seed, direction relevance, citation) 重排，取 top-K
+    """
+    # Step 1: LLM 列 seed 候选
+    candidates = _llm_list_seed_papers(direction, llm, n=n_seeds)
+    print(f"[seed_pool] LLM 列出 {len(candidates)} 个 seed 候选", file=sys.stderr)
+
+    # Step 2: verify + recover
+    seeds: list[dict] = []
+    for cand in candidates:
+        paper = _verify_and_recover_seed(cand)
+        if paper:
+            seeds.append(paper)
+    print(f"[seed_pool] verify 通过 {len(seeds)}/{len(candidates)} 个 seed", file=sys.stderr)
+
+    if not seeds:
+        return []
+
+    # Step 3: 一跳扩展
+    expanded = _expand_seeds_one_hop(seeds, refs_per_seed, cits_per_seed)
+    print(f"[seed_pool] 一跳扩展后候选池 {len(expanded)} 篇", file=sys.stderr)
+
+    # Step 4: rerank
+    seed_ids = {s.get("paperId", "") for s in seeds if s.get("paperId")}
+    ranked = _rerank_by_direction_relevance(expanded, direction, seed_ids)
+    return ranked[:final_pool_size]
+
+
+def _llm_list_seed_papers(direction: str, llm: BaseChatModel, *, n: int = 15) -> list[dict]:
+    """让 LLM 列 N 个方向 seed，返回 list of {arxiv_id, title, reason}"""
+    try:
+        response = invoke_with_retry(llm, [
+            SystemMessage(content=_LLM_SEED_PROMPT),
+            HumanMessage(content=f"研究方向：{direction}\n\n请列出 {n} 篇该方向核心 seed 论文。"),
+        ])
+        raw = parse_llm_json(response.content)
+        candidates = raw.get("seed_papers") or []
+        return [c for c in candidates if isinstance(c, dict) and c.get("arxiv_id")]
+    except Exception as e:
+        print(f"[seed_pool] _llm_list_seed_papers 失败: {type(e).__name__}: {e}",
+              file=sys.stderr)
+        return []
+
+
+def _verify_and_recover_seed(cand: dict) -> dict | None:
+    """
+    机制 1: arxiv_id verify + title fuzzy fallback。
+    LLM 经常把 arxiv_id 末几位记错（2404.16710 → 2404.16701）。
+    直接 verify 失败 → 用 title 搜索 S2 回捞。
+    """
+    arxiv_id = (cand.get("arxiv_id") or "").strip().lstrip("arxiv:").lstrip("ArXiv:")
+    title = (cand.get("title") or "").strip()
+
+    # 1. 用 arxiv_id 直查
+    if arxiv_id:
+        try:
+            detail = get_paper_details(f"ArXiv:{arxiv_id}", fields=GRAPH_FIELDS)
+            if detail:
+                return detail
+        except Exception:
+            pass
+
+    # 2. fallback: 用 title 搜 S2
+    if title:
+        try:
+            results = search_papers(title, limit=3)
+            for r in results:
+                if _title_similarity(r.get("title", "") or "", title) > 0.85:
+                    return r
+        except Exception:
+            pass
+
+    return None
+
+
+def _title_similarity(a: str, b: str) -> float:
+    """归一化 token Jaccard，简单但对论文标题足够"""
+    import re
+    if not a or not b:
+        return 0.0
+    tokens_a = set(re.findall(r"\w+", a.lower()))
+    tokens_b = set(re.findall(r"\w+", b.lower()))
+    if not tokens_a or not tokens_b:
+        return 0.0
+    return len(tokens_a & tokens_b) / len(tokens_a | tokens_b)
+
+
+def _expand_seeds_one_hop(
+    seeds: list[dict],
+    refs_per_seed: int,
+    cits_per_seed: int,
+) -> list[dict]:
+    """
+    对每个 seed 取 references + citations。比 expand_one_hop 简单：
+    - 不需要复杂的累加去重（直接 dedup_papers_by_id）
+    - 控制每个 seed 的 refs/cits 数量在 8-10 内（防 S2 限流）
+    """
+    pool = list(seeds)   # seeds 自己也进 pool
+    for s in seeds:
+        pid = s.get("paperId", "")
+        if not pid:
+            continue
+        try:
+            pool.extend(get_references(pid, limit=refs_per_seed) or [])
+        except Exception as e:
+            print(f"[seed_pool] get_references({pid}) 失败: {type(e).__name__}",
+                  file=sys.stderr)
+        try:
+            pool.extend(get_citations(pid, limit=cits_per_seed) or [])
+        except Exception as e:
+            print(f"[seed_pool] get_citations({pid}) 失败: {type(e).__name__}",
+                  file=sys.stderr)
+    return _dedup_papers_by_id(pool)
+
+
+def _rerank_by_direction_relevance(
+    papers: list[dict],
+    direction: str,
+    seed_ids: set,
+) -> list[dict]:
+    """
+    机制 2: rerank 按 (is_seed, TF-IDF sim to direction, citation) 降序。
+    避免 filter_and_rank 的纯 citation 排序把方向论文（cit 低）甩到末尾。
+    """
+    direction_emb = get_text_embedding(direction)
+
+    def sort_key(p: dict) -> tuple:
+        pid = p.get("paperId") or ""
+        is_seed = pid in seed_ids
+        text = ((p.get("title") or "") + " " + (p.get("abstract") or "")).strip()
+        sim = (
+            compute_cosine_similarity(direction_emb, get_text_embedding(text))
+            if text else 0.0
+        )
+        cit = p.get("citationCount") or 0
+        return (is_seed, sim, cit)
+
+    return sorted(papers, key=sort_key, reverse=True)
+
+
+# ===========================================================================
+# Phase A 主入口
+# ===========================================================================
 
 
 def build_research_material_pack(
@@ -63,21 +259,24 @@ def build_research_material_pack(
     Returns:
         完整 ResearchMaterialPack，可直接喂给 elaborate_proposal_from_pack
     """
-    # ---- Step 0: query expansion（让 LLM 把宽方向拆成具体子查询）----
-    # 防止 S2 关键词搜索把 "LLM inference acceleration" 这种宽词命中泛论文
-    # （GPT-3 / Llama 2 / PyTorch 等碾压方向相关的 LayerSkip / DEL / QSpec）
-    extra_queries = _expand_search_queries(direction, extractor_llm)
-    print(f"[phase_a] Step 0/4: 子查询扩展 = {extra_queries}", file=sys.stderr)
+    # ---- Step 0: build_seed_pool (Scheme X) —— 用 LLM 知识列方向 seed ----
+    # 替换 S2 keyword search 路径。S2 关键词搜索对 "LLM inference" 这种宽 query
+    # 会命中所有 LLM 大论文（GPT-3 / Llama 2 / PyTorch），把方向相关的小众论文
+    # （LayerSkip / DEL / QSpec）压在 100+ 名外。LLM 列 seed 直接精确命中方向。
+    print(f"[phase_a] Step 0/4: build_seed_pool（LLM 列方向 seed + 一跳扩展 + rerank）",
+          file=sys.stderr)
+    seed_pool = build_seed_pool(direction, extractor_llm)
+    print(f"[phase_a] seed_pool: {len(seed_pool)} 篇候选", file=sys.stderr)
 
-    # ---- Step 1: 文献发现 + 实体表 + 结构洞候选 ----
-    print(f"[phase_a] Step 1/4: build_concept_graph(direction={direction[:60]!r}, "
-          f"+{len(extra_queries)} extra_queries)", file=sys.stderr)
+    # ---- Step 1: 实体表 + 结构洞（用 seed_pool 跳过 build_concept_graph 的搜索层）----
+    print(f"[phase_a] Step 1/4: build_concept_graph(seed_pool=<{len(seed_pool)} papers>)",
+          file=sys.stderr)
     graph = build_concept_graph(
         research_direction=direction,
         core_problem=direction,
         llm=extractor_llm,
         backend=backend,
-        extra_queries=extra_queries,
+        seed_pool=seed_pool,
     )
     print(f"[phase_a] graph: {len(graph.papers)} papers, "
           f"{len(graph.entities)} entities, {len(graph.limitations)} limitations, "
@@ -316,18 +515,20 @@ def _bucket_by_year(
 
     桶定义：
       - foundational_pre_2024: < 2024 年（基础工作）
-      - hot_2025_2026:         2025-2026 年（最近热门）
+      - hot_2024_2026:         2024-2026 年（近期热门）
+        Note: 2024 是 LLM acceleration 等多个赛道的爆发年（LayerSkip / EAGLE-2 /
+        Medusa-2 等），不能像之前 _bucket_by_year v1 那样把 2024 漏掉
     """
     buckets: dict[str, list[str]] = {
         "foundational_pre_2024": [],
-        "hot_2025_2026": [],
+        "hot_2024_2026": [],
     }
     for p in papers:
         evid_id = _format_evidence_id(p, arxiv_map)
         year = p.year or 0
-        if year < 2024 and year > 0:
+        if 0 < year < 2024:
             buckets["foundational_pre_2024"].append(evid_id)
-        elif year >= 2025:
-            buckets["hot_2025_2026"].append(evid_id)
+        elif year >= 2024:
+            buckets["hot_2024_2026"].append(evid_id)
     # 删空桶
     return {k: v for k, v in buckets.items() if v}
