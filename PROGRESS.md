@@ -194,3 +194,58 @@ commit f4ab5de → 33a683f 期间：
 - diff demo 只是手工构造的 "ideal proposal"，没验证 LLM 能产到这个质量 —
   接好 elaborator 后跑实测才能验证
 - StructuralHoleHook 已构造但 elaborator 没读 — 接口升级时一起接
+
+---
+
+## 2026-04-26 | elaborator v3 pack-aware path
+
+**Commit**: `f77caaf` (feat(elaborator): v3 pack-aware path elaborate_proposal_from_pack)
+
+### 关键决策
+
+1. **新函数并存而非改老函数签名**
+   - 问题：`elaborate_proposal(skeleton, concept_graph, llm)` 已被 LangGraph
+     节点和 20 个测试依赖，强行改 signature 接 ResearchMaterialPack 会破坏 v2 路径
+   - 决策：新增 `elaborate_proposal_from_pack` 作为 v3 主入口，老函数保留
+   - 收益：v2 路径 0 改动 0 回归；v3 路径完全独立可演进；下游可按 pack/graph 是否
+     存在选择走哪条 path
+   - 代价：proposal_elaborator.py 文件变大；接受这个代价换取演进安全
+
+2. **resource_estimate 由 constraints 兜底，LLM 可覆盖**
+   - 问题：让 LLM 凭空估 auto/HITL/manual 三档资源是高方差任务，输出可能不合理
+   - 决策：`_build_proposal_v3` 先用 `constraints.gpu_hours_budget` 和
+     `wall_clock_days` 拼出三档默认值，LLM 输出里如有 resource_estimate 字段
+     才覆盖
+   - 收益：即使 LLM 漏字段，渲染端也能看到合理三档；human_hours = days × 2
+     (HITL) / × 40 (manual) 是粗略但稳定的启发
+
+3. **校验加 GAP_NOT_DECLARED 强制 '**The gap**' 段**
+   - 问题：QuantSkip seed 的关键 narrative 信号是 existing_methods 末尾那段
+     "**The gap**: No work measures..."。LLM 容易写散文式综述而漏掉这个总结
+   - 决策：硬约束校验 `"**The gap**" in existing_methods`，否则反馈让 LLM 补
+   - 配套：FORBIDDEN_TECHNIQUE_USED 也是同思路——禁用技术是用户硬约束，
+     LLM 容易在 brainstorm 时把 GRPO/RLHF 写进 proposed_method
+
+### 踩的坑
+
+1. **assert 的预期值与 fixture 公式不一致**
+   - 症状：`test_key_references_formatted_fallback` 第一次跑挂掉 ——
+     fixture `_pack()` 里 `"ACL 2024" if i % 2 else "EMNLP 2025"` 让 i=0（偶数）
+     映射到 EMNLP，但 assert 写的是 ACL
+   - 解法：assert 改成 EMNLP，并加注释说明 i=0 的奇偶映射
+   - 预防：fixture 用三元表达式做映射时，测试 assert 要明确算清楚 index
+     的奇偶位，最好在 fixture 处直接列举 expected mapping 注释
+
+### 测试增量
+
+- test_proposal_elaborator.py +6 个 TestClass / +22 测试：
+  TestEvidenceRender (4) / TestBuildProposalV3 (4) / TestValidateV3 (8) /
+  TestElaboratorFromPackEndToEnd (3) / TestNodeV3 (3)
+- 总测试: 340 → 362 pass (2 pre-existing fail 未变)
+
+### 下一步可做
+
+- diff_quantskip_seed.py 的 LIVE 模式跑实测，看真实 LLM 输出离 ideal 多远
+- 如果 LLM 输出离 ideal 差距小 → 进入 Phase A 调研 Agent 自动构造
+  ResearchMaterialPack（不再手工）
+- 如果差距大 → 改 SYSTEM_PROMPT_V3，先把单 branch 质量打稳
