@@ -26,7 +26,7 @@ pytest tests/test_graphs/test_routing.py -v
 | 测试文件 | 覆盖范围 |
 |----------|----------|
 | `tests/test_state.py` | ResearchState 所有字段、枚举类型、PublishMatrix、ConceptGraph v2 schema、AbstractionBranch v2 新字段、v3 seed-schema (StructuralHoleHook / ResearchConstraints / ExpectedOutcomes / ResearchMaterialPack / DebateRound / DebateResult) |
-| `tests/test_tools/test_seed_renderer.py` | ResearchProposal → markdown 渲染：metadata 块、各 section 占位符、phases / outcomes structured 优先、references formatted vs raw、resource estimate 三档 |
+| `tests/test_tools/test_seed_renderer.py` | ResearchProposal → markdown 渲染：metadata 块、各 section 占位符、phases / outcomes structured 优先、references formatted vs raw、resource estimate 三档、novelty_assessment section（SciMON boost 后填）|
 | `tests/test_tools/test_similarity.py` | TF-IDF 嵌入、余弦相似度计算 |
 | `tests/test_tools/test_perturbation_strategies.py` | 7 种扰动策略代码模板执行正确性 |
 | `tests/test_tools/test_json_parser.py` | LLM JSON 输出解析、代码块剥离、截断修复 |
@@ -38,6 +38,7 @@ pytest tests/test_graphs/test_routing.py -v
 | `tests/test_agents/test_phase_a_orchestrator.py` | helper（_looks_like_arxiv_id / _format_evidence_id / _bucket_by_year）/ _resolve_arxiv_ids 走 S2（含异常吞掉）/ _make_full_text_provider 按 evidence_paper_id 反查 / build_research_material_pack 端到端串接 / Scheme X 完整路径（_llm_list_seed_papers / _verify_and_recover_seed 含 title 回捞 / _title_similarity / _expand_seeds_one_hop / _rerank_by_direction_relevance / build_seed_pool 端到端） |
 | `tests/test_agents/test_hook_writer.py` | EntityPair → StructuralHoleHook：happy path / max_hooks 截断 / relation_type 校验+反馈重试 / 大小写不敏感 / LLM 失败跳过该 pair / 部分失败不阻塞 / 代表论文按 citation 排 / prompt 含方向+论文标题 |
 | `tests/test_agents/test_phenomenon_miner.py` | 单论文挖现象（unexplained_trend / surprising_result）/ type 校验（cross_paper_contradiction 单论文路径滤掉）/ 缺 description 或 quote 丢弃 / max_per_paper 截断 / 长 quote 截到 500 / non-dict 条目跳过 / LLM 失败/JSON 不可解析返空 / batch 部分失败不阻塞 / full_text_provider 异常吞掉 / prompt 截 20K |
+| `tests/test_agents/test_novelty_booster.py` | SciMON loop：query 抽取（含 fallback 到 title）/ S2 召回去重 + 限 8 / overlap 评估 4 种 level / novelty_score clamp [0,1] / 大小写不敏感 / refine 写回 / 端到端（partial 即停 / substantial 触发 refine 后收敛 / max_rounds 截断 / 0 召回视为 none / assess 失败保守 partial / convergence_levels 自定义） |
 | `tests/test_graphs/test_routing.py` | critic_router / execution_router / final_router 路由逻辑 |
 
 ### 预挂测试（基线，非 Phase 1 v2 引入）

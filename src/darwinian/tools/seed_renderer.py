@@ -11,6 +11,7 @@ Seed Renderer：把 ResearchProposal 渲染成 QuantSkip 风格的 seed.md。
 from __future__ import annotations
 
 from darwinian.state import (
+    NoveltyAssessment,
     ResearchMaterialPack,
     ResearchProposal,
 )
@@ -72,6 +73,11 @@ def render_proposal(
     # ---- 资源预估 ----
     parts.append("\n\n## 资源预估\n")
     parts.append(_render_resource_estimate(proposal))
+
+    # ---- 新颖性评估（SciMON boost 后填）----
+    if proposal.novelty_assessment is not None:
+        parts.append("\n\n## 新颖性评估\n")
+        parts.append(_render_novelty(proposal.novelty_assessment))
 
     return "".join(parts)
 
@@ -201,3 +207,20 @@ def _format_dict(d: dict) -> str:
     if not d:
         return "(待补)"
     return ", ".join(f"{k}={v}" for k, v in d.items())
+
+
+def _render_novelty(na: NoveltyAssessment) -> str:
+    """渲染 NoveltyAssessment 为 markdown 子段"""
+    lines = [
+        f"- **overlap_level**: `{na.overlap_level}` (novelty_score={na.novelty_score:.2f})",
+    ]
+    if na.closest_work_title:
+        ref = na.closest_work_title
+        if na.closest_work_paper_id:
+            ref = f"{ref} ({na.closest_work_paper_id})"
+        lines.append(f"- **closest prior work**: {ref}")
+    if na.overlap_summary:
+        lines.append(f"- **overlap**: {na.overlap_summary}")
+    if na.differentiation_gap:
+        lines.append(f"- **differentiation gap**: {na.differentiation_gap}")
+    return "\n".join(lines)

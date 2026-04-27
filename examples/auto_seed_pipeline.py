@@ -102,6 +102,18 @@ def main() -> None:
         sys.exit(3)
     print("[auto_seed] Phase B 完成", file=sys.stderr)
 
+    # ---- Phase B.5: SciMON novelty boost ----
+    from darwinian.agents.novelty_booster import boost_novelty
+    print("[auto_seed] Phase B.5 启动 —— SciMON novelty boost (max 3 rounds)",
+          file=sys.stderr)
+    proposal, boost_result = boost_novelty(
+        proposal=proposal, direction=direction, llm=extractor_llm, max_rounds=3,
+    )
+    print(f"[auto_seed] Phase B.5 完成: {boost_result.rounds_taken} 轮, "
+          f"converged={boost_result.converged}, "
+          f"final overlap_level={(boost_result.final_assessment.overlap_level if boost_result.final_assessment else 'n/a')}",
+          file=sys.stderr)
+
     # ---- 渲染 ----
     from darwinian.tools.seed_renderer import render_proposal
     md = render_proposal(proposal, material_pack=pack)

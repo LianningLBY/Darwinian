@@ -336,6 +336,62 @@ class ExpectedOutcomes(BaseModel):
     )
 
 
+class NoveltyAssessment(BaseModel):
+    """
+    单轮新颖性评估：把 proposal 跟 S2 检索到的最相似 prior work 对比。
+
+    供 SciMON-style novelty boost loop 使用：overlap_level 决定是否需要进一步
+    refinement。novelty_score 是 LLM 主观打分，用于打分式评估和 logging。
+    """
+    overlap_level: Literal["none", "partial", "substantial", "identical"] = Field(
+        description="重叠程度："
+                    "none=完全不同方向；"
+                    "partial=有交集但 contribution 不同；"
+                    "substantial=已有明显前置工作做过类似；"
+                    "identical=本质同一个 idea，必须重写或丢弃",
+    )
+    closest_work_paper_id: str = Field(
+        default="",
+        description="最相似 prior work 的 S2 paperId 或 'arxiv:xxx'",
+    )
+    closest_work_title: str = Field(
+        default="",
+        description="最相似 prior work 的标题",
+    )
+    overlap_summary: str = Field(
+        default="",
+        description="一句话说明 ours 跟 closest_work 哪些内容重叠",
+    )
+    differentiation_gap: str = Field(
+        default="",
+        description="ours 还需要怎么改才能跟 closest_work 真正区分开。"
+                    "供下一轮 refinement 用",
+    )
+    novelty_score: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="LLM 主观新颖性打分 (0-1)：1.0 = 完全 novel；0.0 = identical",
+    )
+
+
+class NoveltyBoostResult(BaseModel):
+    """
+    SciMON-style 新颖性迭代提升的最终结果。
+
+    收敛条件：final_assessment.overlap_level in {none, partial}。
+    未收敛时仍返回最后一轮的 proposal + assessment，让调用方决定丢/留。
+    """
+    rounds_taken: int = Field(default=0, description="实际跑了几轮")
+    final_assessment: NoveltyAssessment | None = Field(default=None)
+    converged: bool = Field(
+        default=False,
+        description="True=收敛到 partial 或更佳；False=即使最大重试仍 substantial+",
+    )
+    revisions_log: list[str] = Field(
+        default_factory=list,
+        description="每轮 refinement 的简短记录，用于 debug",
+    )
+
+
 class ResearchProposal(BaseModel):
     """
     Phase 1 v3 产出：从 AbstractionBranch 骨架展开的完整研究 proposal。
@@ -411,6 +467,13 @@ class ResearchProposal(BaseModel):
     resource_estimate: ResourceEstimate = Field(
         default_factory=ResourceEstimate,
         description="auto / human_in_loop / manual 三种执行模式的资源估算",
+    )
+
+    # ---- 新颖性评估（SciMON-style boost loop 后填）----
+    novelty_assessment: NoveltyAssessment | None = Field(
+        default=None,
+        description="跟最相似 prior work 对比的评估。None 表示未跑 novelty boost；"
+                    "存在时 overlap_level 决定 proposal 可用性",
     )
 
 

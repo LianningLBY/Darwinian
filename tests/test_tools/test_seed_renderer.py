@@ -210,3 +210,36 @@ class TestResourceEstimate:
         idx = md.index("## 资源预估")
         tail = md[idx:]
         assert "(待补)" in tail
+
+
+# ===========================================================================
+# Novelty section (SciMON boost result)
+# ===========================================================================
+
+from darwinian.state import NoveltyAssessment
+
+
+class TestNoveltySection:
+    def test_no_assessment_no_section(self):
+        p = _minimal_proposal()
+        md = render_proposal(p)
+        assert "## 新颖性评估" not in md
+
+    def test_assessment_renders(self):
+        na = NoveltyAssessment(
+            overlap_level="partial",
+            closest_work_paper_id="arxiv:2505.22179",
+            closest_work_title="SpecMQuant: Speculative Decoding Meets Quantization",
+            overlap_summary="both quantize draft model and measure acceptance",
+            differentiation_gap="ours measures per-layer cliff, theirs only global",
+            novelty_score=0.7,
+        )
+        p = _minimal_proposal(novelty_assessment=na)
+        md = render_proposal(p)
+        assert "## 新颖性评估" in md
+        assert "`partial`" in md
+        assert "novelty_score=0.70" in md
+        assert "SpecMQuant" in md
+        assert "arxiv:2505.22179" in md
+        assert "both quantize draft model" in md
+        assert "ours measures per-layer cliff" in md
