@@ -102,6 +102,38 @@ class EntityPair(BaseModel):
     score: int = Field(description="min(paper_count_a, paper_count_b)，偏向两端都成熟的组合")
 
 
+class StructuralHoleHook(BaseModel):
+    """
+    Phase A → Phase B 的结构洞弹药。
+    在 EntityPair 之上加一句话 hook + 关系类型，让 elaborator 不用从零想"为什么这个交叉值得做"。
+
+    生成时机：bottleneck_miner 算完共现矩阵 → 给 top-K novel pair 各调一次小 LLM 写 hook_text。
+    供 proposal_elaborator 在 motivation / why_now section 直接引用。
+    """
+    entity_a: str = Field(description="Entity.canonical_name")
+    entity_b: str = Field(description="Entity.canonical_name")
+    score: int = Field(default=0, description="EntityPair.score，方便排序")
+    hook_text: str = Field(
+        description="一句话解释这个交叉为什么值得做。"
+                    "如 'A 边 N 篇都用 metric_X 优化，B 边 M 篇都用 metric_Y 测量，"
+                    "但没人在同一篇里比较 X 和 Y 的 rank correlation'",
+    )
+    relation_type: Literal["divergence", "convergence", "transfer"] = Field(
+        description="交叉的预期关系类型："
+                    "divergence=两端可能发散需对照测；"
+                    "convergence=可能等价值得理论分析；"
+                    "transfer=一端方法迁移到另一端任务",
+    )
+    supporting_paper_ids_a: list[str] = Field(
+        default_factory=list,
+        description="A 边的代表论文 paperId（≤ 5），追溯/查重用",
+    )
+    supporting_paper_ids_b: list[str] = Field(
+        default_factory=list,
+        description="B 边的代表论文 paperId（≤ 5）",
+    )
+
+
 class ConceptGraph(BaseModel):
     """
     Phase 1 v2 核心产物：从 60+ 篇论文抽取出的术语 + 缺陷 + 结构洞。
@@ -197,6 +229,45 @@ class PaperEvidence(BaseModel):
     )
 
 
+class ResearchConstraints(BaseModel):
+    """
+    用户对研究方案的约束条件。
+    Phase A 收集（用户输入或推断），Phase B elaborator 必须满足这些约束。
+
+    设计目标：把"4×RTX PRO 6000、7天内、不用 RL、benchmark 用现成、≤14B 模型"
+    这种约束硬编码成 Pydantic 字段，不再让 LLM 从一段自由文本里"自己理解"。
+    """
+    # 资源
+    gpu_count: int = Field(default=4, description="可用 GPU 数")
+    gpu_model: str = Field(default="", description="GPU 型号，如 'RTX PRO 6000 96GB'")
+    gpu_hours_budget: float = Field(default=0.0, description="总 GPU 小时预算")
+    wall_clock_days: int = Field(default=7, description="项目总周期（天）")
+
+    # 模型/数据
+    max_model_params_b: float = Field(default=14.0, description="允许的最大模型参数（B）")
+    use_existing_benchmarks_only: bool = Field(default=True, description="必须用现成 benchmark")
+    require_human_annotation: bool = Field(default=False, description="是否允许人工标注")
+
+    # 方法学排除
+    forbidden_techniques: list[str] = Field(
+        default_factory=list,
+        description="禁用技术列表，如 ['GRPO', 'PPO', 'DPO', 'RLHF', 'RLVR', 'RLMT']",
+    )
+    require_no_api_for_main: bool = Field(
+        default=True,
+        description="主实验是否禁用闭源 API（baseline 比较可以用）",
+    )
+
+    # Venue 目标
+    target_venues: list[str] = Field(
+        default_factory=list,
+        description="目标 venue 列表（按优先级），如 ['NeurIPS 2026', 'EMNLP 2026']",
+    )
+
+    # 自由扩展
+    extra_notes: str = Field(default="", description="未结构化的额外说明，原文保留")
+
+
 class ResourceEstimate(BaseModel):
     """三种执行模式的资源估算"""
     auto_research: dict = Field(
@@ -210,6 +281,25 @@ class ResourceEstimate(BaseModel):
     manual: dict = Field(
         default_factory=dict,
         description="人工纯手做模式（用于对比，体现 AI 加速）",
+    )
+
+
+class ExpectedOutcomes(BaseModel):
+    """
+    QuantSkip 风格的"正反两种结果都可发表"叙事。
+    把单一 expected_outcomes 字符串拆成 3 个独立字段，防止 elaborator 把"反向也 publishable"
+    这个关键发表保险论证写丢。
+
+    硬约束：positive_finding / negative_finding / why_both_publishable 三者必须都非空。
+    """
+    positive_finding: str = Field(
+        description="正向发现叙事：'如果实验得到 X，则证明 Y'。必须含具体可观测信号",
+    )
+    negative_finding: str = Field(
+        description="反向发现叙事：'如果实验得到 ~X，则证明 Z'。同样必须可发表",
+    )
+    why_both_publishable: str = Field(
+        description="为什么两种结果对社区都有 actionable guidance",
     )
 
 
@@ -251,7 +341,13 @@ class ResearchProposal(BaseModel):
     technical_details: str = Field(default="", description="技术细节（公式、关键算法）")
     expected_outcomes: str = Field(
         default="",
-        description="预期结果。必须包含'正反两种结果都可发表'的 framing",
+        description="预期结果（渲染后的自由文本，markdown 模板用）。"
+                    "仍保留兼容老 elaborator；新代码请填 expected_outcomes_structured",
+    )
+    expected_outcomes_structured: ExpectedOutcomes | None = Field(
+        default=None,
+        description="结构化的正反 publishable 叙事。verifier 校验对象；"
+                    "为 None 时退回检查 expected_outcomes 文本",
     )
 
     # ---- Phased methodology（Darwinian 自创）----
@@ -283,6 +379,116 @@ class ResearchProposal(BaseModel):
         default_factory=ResourceEstimate,
         description="auto / human_in_loop / manual 三种执行模式的资源估算",
     )
+
+
+class ResearchMaterialPack(BaseModel):
+    """
+    Phase A 调研 Agent 的最终产物 / Phase B 强 LLM elaborator 的输入容器。
+
+    设计动机：之前 elaborator 要从 ConceptGraph + list[PaperEvidence] + ResearchConstraints
+    + failed_ledger 多个对象拼装上下文，容易漏字段。MaterialPack 把"喂给 Phase B 的所有素材"
+    打包成单一对象，elaborator 收到这一份就够。
+
+    生成路径：
+      bottleneck_miner → ConceptGraph
+      arxiv_latex_fetcher + paper_evidence_extractor → list[PaperEvidence]
+      共现矩阵 + LLM hook 写作 → list[StructuralHoleHook]
+      用户输入 → ResearchConstraints
+      → 组装成 ResearchMaterialPack → 喂给 proposal_elaborator
+    """
+    direction: str = Field(description="研究方向原文（用户输入）")
+    constraints: ResearchConstraints = Field(
+        default_factory=ResearchConstraints,
+        description="资源/合规/方法学约束。elaborator 必须满足",
+    )
+    paper_evidence: list[PaperEvidence] = Field(
+        default_factory=list,
+        description="20-30 篇论文的深抽取五元组，按 category 分组的弹药",
+    )
+    concept_graph: ConceptGraph | None = Field(
+        default=None,
+        description="跨论文的实体表 + limitations + 共现矩阵",
+    )
+    structural_hole_hooks: list[StructuralHoleHook] = Field(
+        default_factory=list,
+        description="带 hook_text 的结构洞 top-K，elaborator 在 motivation 里直接引用",
+    )
+    timeline_signals: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="按时间分桶的 paperId 列表，给 'Why Now' section 提供时间感。"
+                    "key 形如 'foundational_pre_2024' / 'hot_2025_2026' / 'last_30_days'",
+    )
+    prior_failures: list[FailedRecord] = Field(
+        default_factory=list,
+        description="failed_ledger 的快照，让 elaborator 主动避开已知失败方向",
+    )
+
+    @property
+    def evidence_by_category(self) -> dict[str, list[PaperEvidence]]:
+        """按 PaperEvidence.category 分组，给 elaborator 的 existing_methods section 直接用"""
+        groups: dict[str, list[PaperEvidence]] = {}
+        for ev in self.paper_evidence:
+            cat = ev.category or "uncategorized"
+            groups.setdefault(cat, []).append(ev)
+        return groups
+
+
+# ---------------------------------------------------------------------------
+# Phase C: 辩论裁决（Advocate / Challenger / Judge）
+# ---------------------------------------------------------------------------
+
+class DebateRound(BaseModel):
+    """单轮辩论：Advocate 论证 → Challenger 反驳 → Judge 裁决 + 给概率"""
+    round_number: int = Field(description="第几轮（从 1 开始）")
+    advocate_argument: str = Field(description="正方论证：为什么这个 idea 能中稿")
+    challenger_argument: str = Field(description="反方反驳：弱点 + 已有覆盖 + 风险")
+    judge_assessment: str = Field(description="裁决说明：哪些 challenger 论点站得住、哪些不")
+    estimated_acceptance_rate: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="本轮裁决后的中稿概率估计 (0-1)",
+    )
+    revisions_proposed: list[str] = Field(
+        default_factory=list,
+        description="Judge 建议的 seed 修改点列表，传给下一轮 Advocate 用",
+    )
+
+
+class DebateResult(BaseModel):
+    """
+    Phase C 完整辩论历史 + 收敛裁决。
+    收敛条件：final_acceptance_rate ≥ acceptance_threshold AND
+              最近 2 轮 estimated_acceptance_rate 的 |delta| < convergence_delta
+    """
+    rounds: list[DebateRound] = Field(default_factory=list)
+    final_acceptance_rate: float = Field(default=0.0, ge=0.0, le=1.0)
+    acceptance_threshold: float = Field(
+        default=0.30,
+        description="立项的中稿率门槛（默认 30%）",
+    )
+    convergence_delta: float = Field(
+        default=0.05,
+        description="判收敛的相邻轮 delta 阈值（默认 5%）",
+    )
+    converged: bool = Field(
+        default=False,
+        description="True=已收敛且达到门槛，可立项；False=继续辩论或终止",
+    )
+    revised_proposal: ResearchProposal | None = Field(
+        default=None,
+        description="辩论修订后的 seed（最后一轮 Advocate 输出），收敛时填",
+    )
+
+    @property
+    def is_above_threshold(self) -> bool:
+        return self.final_acceptance_rate >= self.acceptance_threshold
+
+    @property
+    def delta_last_two(self) -> float:
+        """最近两轮 estimated_acceptance_rate 的绝对差；不足两轮返回 inf"""
+        if len(self.rounds) < 2:
+            return float("inf")
+        return abs(self.rounds[-1].estimated_acceptance_rate - self.rounds[-2].estimated_acceptance_rate)
 
 
 class AbstractionBranch(BaseModel):
