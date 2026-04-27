@@ -1,0 +1,203 @@
+"""
+Seed Renderer：把 ResearchProposal 渲染成 QuantSkip 风格的 seed.md。
+
+设计目标：
+  - 纯函数，不依赖 LLM；输入 ResearchProposal + 可选 ResearchMaterialPack，输出 markdown
+  - 严格对齐 QuantSkip seed 模板的 section 顺序与 metadata 块
+  - 渲染时优先用 expected_outcomes_structured（如有），fallback 到 expected_outcomes 自由文本
+  - 渲染缺字段时用占位符 '(待补)' 而非崩溃，方便人眼快速定位 elaborator 漏的地方
+"""
+
+from __future__ import annotations
+
+from darwinian.state import (
+    ResearchMaterialPack,
+    ResearchProposal,
+)
+
+
+def render_proposal(
+    proposal: ResearchProposal,
+    *,
+    material_pack: ResearchMaterialPack | None = None,
+) -> str:
+    """
+    把 ResearchProposal 渲染成 QuantSkip 风格 markdown。
+
+    Args:
+        proposal: 必填，elaborator 产出
+        material_pack: 可选；提供时用 pack.direction 作为"种子"原文，pack.constraints
+                       做资源预估的兜底
+
+    Returns:
+        完整 markdown 字符串（含 metadata 块、各 section、引用列表）
+    """
+    parts: list[str] = []
+
+    # ---- 标题 + metadata 块 ----
+    title = proposal.title or "(待补标题)"
+    parts.append(f"# {title}\n\n")
+
+    seed_text = proposal.seed or (material_pack.direction if material_pack else "")
+    parts.append(_render_metadata_block(proposal, seed_text))
+
+    # ---- 描述（elevator pitch）----
+    parts.append("\n\n## 描述\n")
+    parts.append(proposal.elevator_pitch or "(待补)")
+
+    # ---- 核心问题 ----
+    parts.append("\n\n## 核心问题\n")
+    parts.append(proposal.challenges or "(待补)")
+
+    # ---- 机遇 / Why Now ----
+    parts.append("\n\n## 机遇 / Why Now\n")
+    parts.append(proposal.motivation or "(待补)")
+
+    # ---- 方法思路 ----
+    parts.append("\n\n## 方法思路\n")
+    parts.append(_render_methodology(proposal))
+
+    # ---- 研究现状 ----
+    parts.append("\n\n## 研究现状\n")
+    parts.append(proposal.existing_methods or "(待补)")
+
+    # ---- 目标 Venue ----
+    parts.append("\n\n## 目标 Venue\n")
+    parts.append(_render_venues(proposal))
+
+    # ---- 关键参考 ----
+    parts.append("\n\n## 关键参考\n")
+    parts.append(_render_references(proposal))
+
+    # ---- 资源预估 ----
+    parts.append("\n\n## 资源预估\n")
+    parts.append(_render_resource_estimate(proposal))
+
+    return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# 子渲染器
+# ---------------------------------------------------------------------------
+
+def _render_metadata_block(proposal: ResearchProposal, seed_text: str) -> str:
+    """
+    QuantSkip 顶部的 metadata 块：
+        **状态**: 待审阅
+        **级别**: top-tier
+        **种子**: ...
+        **创建时间**: ISO timestamp
+    """
+    # markdown 硬换行 = 行末两个空格 + 换行
+    status_zh = _translate_status(proposal.status)
+    seed_display = seed_text.strip() if seed_text else "(待补)"
+    lines = [
+        f"**状态**: {status_zh}  ",
+        f"**级别**: {proposal.level or '(待补)'}  ",
+        f"**种子**: {seed_display}  ",
+        f"**创建时间**: {proposal.created_at or '(待补)'}",
+    ]
+    return "\n".join(lines)
+
+
+_STATUS_MAP = {
+    "draft": "待审阅",
+    "under_review": "审稿中",
+    "approved": "已立项",
+    "rejected": "已驳回",
+}
+
+
+def _translate_status(s: str) -> str:
+    return _STATUS_MAP.get(s, s or "(待补)")
+
+
+def _render_methodology(proposal: ResearchProposal) -> str:
+    """
+    优先按 phases 渲染；如果没 phases 退回 proposed_method + technical_details 自由文本。
+    """
+    if proposal.methodology_phases:
+        out = [proposal.proposed_method or ""]
+        if out[0]:
+            out.append("\n\n")
+        for phase in proposal.methodology_phases:
+            inputs = ", ".join(phase.inputs) if phase.inputs else "—"
+            outputs = ", ".join(phase.outputs) if phase.outputs else "—"
+            out.append(
+                f"({phase.phase_number}) **{phase.name}**: {phase.description}\n"
+                f"  - inputs: {inputs}\n"
+                f"  - outputs: {outputs}\n"
+                f"  - expected_compute_hours: {phase.expected_compute_hours:.1f}\n\n"
+            )
+        if proposal.technical_details:
+            out.append(f"\n**Technical details**:\n{proposal.technical_details}")
+        # ---- expected outcomes 拼到最后 ----
+        out.append(f"\n\n**Expected outcomes**:\n{_render_outcomes(proposal)}")
+        return "".join(out).rstrip()
+
+    # fallback：无 phases 时，至少把 proposed_method + technical_details 渲出来
+    fallback = []
+    if proposal.proposed_method:
+        fallback.append(proposal.proposed_method)
+    if proposal.technical_details:
+        fallback.append(f"\n\n**Technical details**:\n{proposal.technical_details}")
+    fallback.append(f"\n\n**Expected outcomes**:\n{_render_outcomes(proposal)}")
+    return "".join(fallback) or "(待补)"
+
+
+def _render_outcomes(proposal: ResearchProposal) -> str:
+    """
+    优先用 expected_outcomes_structured（v3 schema）；fallback 到老 str 字段。
+    structured 渲染时显式分 positive / negative / why-both 三段。
+    """
+    structured = proposal.expected_outcomes_structured
+    if structured is not None:
+        return (
+            f"- **正向发现**: {structured.positive_finding}\n"
+            f"- **反向发现**: {structured.negative_finding}\n"
+            f"- **为什么两种结果都可发表**: {structured.why_both_publishable}"
+        )
+    return proposal.expected_outcomes or "(待补)"
+
+
+def _render_venues(proposal: ResearchProposal) -> str:
+    lines = []
+    if proposal.target_venue:
+        deadline = f" (截止日 {proposal.target_deadline})" if proposal.target_deadline else ""
+        lines.append(f"- {proposal.target_venue}{deadline} — primary target")
+    if proposal.fallback_venue:
+        lines.append(f"- {proposal.fallback_venue} — fallback if timeline slips")
+    return "\n".join(lines) if lines else "(待补)"
+
+
+def _render_references(proposal: ResearchProposal) -> str:
+    """
+    优先用 key_references_formatted（QuantSkip 风格的 'Name: Title (Venue Year)'），
+    fallback 到 key_references 裸 paperId 列表。
+    """
+    if proposal.key_references_formatted:
+        return "\n".join(f"- {r}" for r in proposal.key_references_formatted)
+    if proposal.key_references:
+        return "\n".join(f"- {r}" for r in proposal.key_references)
+    return "(待补)"
+
+
+def _render_resource_estimate(proposal: ResearchProposal) -> str:
+    est = proposal.resource_estimate
+    lines = []
+    if est.auto_research:
+        lines.append(f"- auto_research: {_format_dict(est.auto_research)}")
+    if est.human_in_loop:
+        lines.append(f"- human_in_loop: {_format_dict(est.human_in_loop)}")
+    if est.manual:
+        lines.append(f"- manual: {_format_dict(est.manual)}")
+    if not lines:
+        lines.append("(待补)")
+    return "\n".join(lines)
+
+
+def _format_dict(d: dict) -> str:
+    """把 {gpu_hours: 24, usd_cost: 50, wall_clock_days: 3} 渲成可读字符串"""
+    if not d:
+        return "(待补)"
+    return ", ".join(f"{k}={v}" for k, v in d.items())

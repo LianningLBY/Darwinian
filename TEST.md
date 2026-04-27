@@ -26,6 +26,7 @@ pytest tests/test_graphs/test_routing.py -v
 | 测试文件 | 覆盖范围 |
 |----------|----------|
 | `tests/test_state.py` | ResearchState 所有字段、枚举类型、PublishMatrix、ConceptGraph v2 schema、AbstractionBranch v2 新字段、v3 seed-schema (StructuralHoleHook / ResearchConstraints / ExpectedOutcomes / ResearchMaterialPack / DebateRound / DebateResult) |
+| `tests/test_tools/test_seed_renderer.py` | ResearchProposal → markdown 渲染：metadata 块、各 section 占位符、phases / outcomes structured 优先、references formatted vs raw、resource estimate 三档 |
 | `tests/test_tools/test_similarity.py` | TF-IDF 嵌入、余弦相似度计算 |
 | `tests/test_tools/test_perturbation_strategies.py` | 7 种扰动策略代码模板执行正确性 |
 | `tests/test_tools/test_json_parser.py` | LLM JSON 输出解析、代码块剥离、截断修复 |
