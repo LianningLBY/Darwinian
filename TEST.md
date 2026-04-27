@@ -36,6 +36,7 @@ pytest tests/test_graphs/test_routing.py -v
 | `tests/test_agents/test_hypothesis_generator.py` | 硬约束 5 种 error code、候选建议 (word-boundary+兜底)、结构化反馈、step 7.5 组合查重、v2/降级双路径 |
 | `tests/test_agents/test_proposal_elaborator.py` | v3 ResearchMaterialPack 路径（按 category 分组 prompt / 8 项校验 / forbidden_techniques / structured outcomes / resource estimate 兜底 / Fix A 防 title 幻觉 / Fix B 写作 phase 不算 GPU / 节点从 state.material_pack 读素材） |
 | `tests/test_agents/test_phase_a_orchestrator.py` | helper（_looks_like_arxiv_id / _format_evidence_id / _bucket_by_year）/ _resolve_arxiv_ids 走 S2（含异常吞掉）/ _make_full_text_provider 按 evidence_paper_id 反查 / build_research_material_pack 端到端串接 / Scheme X 完整路径（_llm_list_seed_papers / _verify_and_recover_seed 含 title 回捞 / _title_similarity / _expand_seeds_one_hop / _rerank_by_direction_relevance / build_seed_pool 端到端） |
+| `tests/test_agents/test_hook_writer.py` | EntityPair → StructuralHoleHook：happy path / max_hooks 截断 / relation_type 校验+反馈重试 / 大小写不敏感 / LLM 失败跳过该 pair / 部分失败不阻塞 / 代表论文按 citation 排 / prompt 含方向+论文标题 |
 | `tests/test_graphs/test_routing.py` | critic_router / execution_router / final_router 路由逻辑 |
 
 ### 预挂测试（基线，非 Phase 1 v2 引入）

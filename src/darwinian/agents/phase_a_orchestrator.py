@@ -32,6 +32,7 @@ from darwinian.state import (
     ResearchConstraints,
     ResearchMaterialPack,
 )
+from darwinian.agents.hook_writer import write_structural_hole_hooks
 from darwinian.tools.arxiv_latex_fetcher import fetch_arxiv_latex, render_for_llm
 from darwinian.tools.paper_evidence_extractor import batch_extract_evidence
 from darwinian.tools.semantic_scholar import (
@@ -282,6 +283,22 @@ def build_research_material_pack(
           f"{len(graph.entities)} entities, {len(graph.limitations)} limitations, "
           f"{len(graph.novel_pair_hints)} novel pairs", file=sys.stderr)
 
+    # ---- Step 1.5: hook_writer 把 EntityPair 升级为 StructuralHoleHook ----
+    # elaborator prompt 里【结构洞 hooks】section 之前永远空（structural_hole_hooks=[]），
+    # 现在用 LLM 把 top-K novel pair 升级为带叙事 + relation_type 的 hook
+    print(f"[phase_a] Step 1.5/4: hook_writer 升级 top-{min(5, len(graph.novel_pair_hints))} novel pairs",
+          file=sys.stderr)
+    structural_hole_hooks = write_structural_hole_hooks(
+        graph.novel_pair_hints,
+        graph.entities,
+        graph.papers,
+        direction,
+        extractor_llm,
+        max_hooks=5,
+    )
+    print(f"[phase_a] hooks: 生成 {len(structural_hole_hooks)} 条 StructuralHoleHook",
+          file=sys.stderr)
+
     # ---- Step 2: 选 top-K paper 做深抽取 ----
     # 排序键：(entity_hits, citation_count) 降序
     # entity_hits = 这篇论文贡献了多少个不同的 entity（method/dataset/metric）
@@ -326,7 +343,7 @@ def build_research_material_pack(
         constraints=constraints,
         paper_evidence=paper_evidence,
         concept_graph=graph,
-        structural_hole_hooks=[],   # 留给后续 hook_writer 实现
+        structural_hole_hooks=structural_hole_hooks,
         timeline_signals=timeline,
         prior_failures=[],
     )
