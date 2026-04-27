@@ -108,3 +108,48 @@ commit f4ab5de → 33a683f 期间：
   但 exa-py 依赖未加、token 额度需用户自己申请，留作后续 commit
 - **arxiv 补充源**：同理，能扩大种子论文覆盖面但需新依赖
 - **Daytona/Modal 替换 Docker**：解决 `code_executor.py` 的 GPU 短板，属 Phase 2 改造
+
+---
+
+## 2026-04-26 | Phase 1 v3 seed-schema gap 补齐
+
+**Commit**: `9219fb0` (feat(state): Phase 1 v3 seed-schema 新增 6 个 schema)
+
+### 关键决策
+
+1. **ResearchMaterialPack 作为 Phase A→B 边界容器**
+   - 问题：之前 elaborator 要从 ConceptGraph + list[PaperEvidence] + ResearchConstraints + failed_ledger 多个对象自己拼上下文，容易漏字段
+   - 决策：把"喂给 Phase B 的所有素材"打包成单一 Pydantic 对象，elaborator 收一份就够
+   - 配套 `evidence_by_category` property，给 existing_methods section 直接用，避免 elaborator 二次分组算
+
+2. **ExpectedOutcomes 拆字段而非保留单 str**
+   - 问题：QuantSkip 的关键发表保险是"正反两种结果都 publishable"——这个叙事元素如果埋在自由文本里，elaborator 极易漏掉
+   - 决策：拆成 positive_finding / negative_finding / why_both_publishable 三个 required 字段
+   - 兼容：保留 expected_outcomes: str 字段，新增 expected_outcomes_structured: ExpectedOutcomes | None，老 elaborator 不破坏
+
+3. **DebateRound/Result 提前 schema 化但不写 prompt**
+   - 权衡：完整 Phase C 应包含 Advocate/Challenger/Judge prompt 模板
+   - 决策：只先写 schema (DebateRound + DebateResult + delta_last_two/is_above_threshold property)，prompt 模板待 seed 质量稳定后再实现
+   - 理由：辩论 Judge 给的"中稿率"只在 seed 质量到 QuantSkip 档次才有意义，否则 Judge 会对一坨平庸 seed 反复打 15%，浪费 token
+
+### 踩的坑
+
+1. **stash 期间路径模式不通过**
+   - 症状：`git stash push -- 'src/**/*.pyc'` 在 zsh 下 glob 行为不一致，stash 内容空
+   - 解法：stash 用显式路径，或先 `git rm --cached` 处理 .pyc
+   - 预防：以后 stash pyc 噪声直接 `git checkout -- 'src/**/*.pyc'` 更直接
+
+2. **HTTPS PAT 过期 + SSH key 跨账户失效**
+   - 症状：origin remote 用嵌入 PAT 的 HTTPS URL，token 过期；本机 SSH key 是另一个 GitHub 账户，对 LianningLBY/Darwinian 无 push 权限
+   - 解法：用户提供新 PAT 后，**一次性** push 而不写入 git config（`git push https://<TOKEN>@github.com/...`）
+   - 预防：CLAUDE.md 标的 SSH remote `git@github.com:LianningLBY/Darwinian.git` 仅文档说法，实际 origin 是 HTTPS+token 形式；token 过期需用户介入，agent 别自己改 git config
+
+3. **worktree 删不掉因为 .pyc 噪声**
+   - 症状：`git worktree remove` 报 "contains modified or untracked files" — pytest 跑完留一堆 .pyc
+   - 解法：`git worktree remove --force`（.pyc 是构建产物，丢弃安全）
+   - 预防：pytest 跑前 `export PYTHONDONTWRITEBYTECODE=1` 或 worktree 加 .gitignore（暂未做）
+
+### 测试增量
+
+- test_state.py: +6 个 TestClass / +16 个 test (TestStructuralHoleHook×3, TestResearchConstraints×2, TestExpectedOutcomes×2, TestResearchProposalExpectedOutcomesField×2, TestResearchMaterialPack×3, TestDebate×4)
+- 总测试: 308 → 324 pass (2 pre-existing fail 未变)
