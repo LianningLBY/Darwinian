@@ -705,3 +705,102 @@ class TestNodeV3:
             out = proposal_elaborator_node_v3(state, MagicMock(), material_pack=pack)
         assert mock_fn.call_count == 0
         assert out["research_proposals"] == []
+
+
+# ===========================================================================
+# Fix A: 始终从 pack 重建 key_references_formatted（防 LLM 标题幻觉）
+# Fix B: WRITING_PHASE_HAS_GPU_HOURS 校验
+# ===========================================================================
+
+class TestFixAReferencesFromPack:
+    """LLM 给的 key_references_formatted 应被无视，始终用 pack.paper_evidence 重建"""
+
+    def test_llm_given_krf_is_ignored(self):
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        # LLM 故意瞎编标题（模拟 DEL 被瞎编成 "Draft-Enhanced Speculative Decoding"）
+        raw["key_references_formatted"] = [
+            "Method0: COMPLETELY_HALLUCINATED_TITLE (FAKE_VENUE)",
+            "Method1: ANOTHER_FAKE (Wrong 2099)",
+        ]
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        # 应使用 pack 的真实 title，不接受 LLM 的瞎编
+        for r in proposal.key_references_formatted:
+            assert "HALLUCINATED" not in r
+            assert "FAKE" not in r
+        # 应是 pack.paper_evidence 里的真实 title 拼出来
+        assert proposal.key_references_formatted[0] == "Method0: full title here (EMNLP 2025)"
+
+    def test_unknown_paper_id_skipped(self):
+        """key_references 含 pack 里没有的 id，渲染时跳过该项（_validate_v3 会另外抓 MISSING_PAPER_ID）"""
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["key_references"] = [pack.paper_evidence[0].paper_id, "arxiv:nonexistent"]
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        assert len(proposal.key_references_formatted) == 1   # 只有真实存在的那一篇被渲
+
+
+class TestFixBWritingPhaseHasGpuHours:
+    """phase name 含 'paper writing' 等关键词且 expected_compute_hours > 0 应触发"""
+
+    def _writing_phase_dict(self, hours: float = 48.0):
+        return {
+            "phase_number": 4, "name": "Paper Writing and Submission Preparation",
+            "description": "Write NeurIPS paper", "inputs": ["results"],
+            "outputs": ["PDF"], "expected_compute_hours": hours,
+        }
+
+    def test_writing_phase_with_gpu_hours_flagged(self):
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["methodology_phases"].append(self._writing_phase_dict(hours=48.0))
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        errors = _validate_v3(proposal, pack)
+        codes = [e[0] for e in errors]
+        assert "WRITING_PHASE_HAS_GPU_HOURS" in codes
+        # detail 含具体被命中的 phase name + hours
+        detail = next(e[1] for e in errors if e[0] == "WRITING_PHASE_HAS_GPU_HOURS")
+        assert detail[0][0] == "Paper Writing and Submission Preparation"
+        assert detail[0][1] == 48.0
+
+    def test_writing_phase_with_zero_hours_ok(self):
+        """expected_compute_hours=0 时不算违反（用户主动归零是接受方案）"""
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["methodology_phases"].append(self._writing_phase_dict(hours=0.0))
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "WRITING_PHASE_HAS_GPU_HOURS" not in codes
+
+    def test_multiple_writing_keywords(self):
+        """Submission / Manuscript / Camera-ready 都要抓"""
+        pack = _pack()
+        for name in ("Manuscript Preparation", "Submission Polish",
+                      "Camera Ready Revisions"):
+            raw = _good_v3_response(pack)
+            raw["methodology_phases"].append({
+                "phase_number": 99, "name": name, "description": "x",
+                "inputs": [], "outputs": [], "expected_compute_hours": 12.0,
+            })
+            proposal = _build_proposal_v3(raw, _skeleton(), pack)
+            codes = [e[0] for e in _validate_v3(proposal, pack)]
+            assert "WRITING_PHASE_HAS_GPU_HOURS" in codes, f"漏抓: {name}"
+
+    def test_phase_name_unrelated_to_writing_passes(self):
+        """普通 phase（如 'Profiling'）不被误抓"""
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        # raw 里默认 3 个 phase 都是 'Profile' / 'Optimize' / 'Validate'，不含写作关键词
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "WRITING_PHASE_HAS_GPU_HOURS" not in codes
+
+    def test_feedback_message_contains_offender_names(self):
+        from darwinian.agents.proposal_elaborator import _build_feedback_v3
+        pack = _pack()
+        errors = [("WRITING_PHASE_HAS_GPU_HOURS",
+                   [("Paper Writing", 48.0), ("Manuscript Polish", 12.0)])]
+        feedback = _build_feedback_v3(errors, pack)
+        assert "Paper Writing" in feedback and "48" in feedback
+        assert "Manuscript Polish" in feedback and "12" in feedback
+        assert "expected_compute_hours 设 0" in feedback or "删掉" in feedback
