@@ -30,6 +30,19 @@ from darwinian.utils.llm_retry import invoke_with_retry
 from darwinian.utils.similarity import compute_cosine_similarity, get_text_embedding
 
 
+def _dedup_papers_by_id(papers: list[dict]) -> list[dict]:
+    """按 paperId 去重，保留首次出现的版本（保留 search 的相关性顺序）"""
+    seen: set = set()
+    out: list[dict] = []
+    for p in papers:
+        pid = p.get("paperId") or p.get("paper_id") or ""
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        out.append(p)
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Step 2: 一跳引用图扩展
 # ---------------------------------------------------------------------------
@@ -544,6 +557,7 @@ def build_concept_graph(
     top_by_popularity: int = 20,
     max_novel_pairs: int = 10,
     backend: str | None = None,
+    extra_queries: list[str] | None = None,
 ) -> ConceptGraph:
     """
     从 research_direction 开始，走完 step 1–6.5 的完整管道，产出 ConceptGraph。
@@ -554,6 +568,11 @@ def build_concept_graph(
         backend: 文献源。None 时读 DARWINIAN_SEARCH_BACKEND 环境变量，默认 "s2"。
                  - "s2": Semantic Scholar，支持 citation graph 一跳扩展（需要 S2_API_KEY 较稳）
                  - "arxiv": arxiv.org，公开免费无限流，但无 citation graph（跳过 step 2）
+        extra_queries: 额外的搜索关键词列表（query expansion）。
+                 用途：宽 research_direction 在 S2 关键词搜索下命中泛论文 ——
+                 通过几条更具体的子查询（如 'self-speculative decoding draft model'）
+                 把方向论文喂进 candidate pool。每条独立调 search_papers_two_tiered，
+                 结果按 paperId 去重后并入 seeds。None 或空列表时无影响。
     """
     if backend is None:
         backend = os.environ.get("DARWINIAN_SEARCH_BACKEND", "s2").lower()
@@ -566,6 +585,15 @@ def build_concept_graph(
             classic_limit=classic_limit,
             recent_limit=recent_limit,
         )
+        # arxiv 模式也接受 extra_queries：每条单独搜并合并去重
+        if extra_queries:
+            for q in extra_queries:
+                if not q or not q.strip():
+                    continue
+                more = arxiv_search.search_papers_arxiv_two_tiered(
+                    q, classic_limit=classic_limit // 2, recent_limit=recent_limit // 2,
+                )
+                candidates = _dedup_papers_by_id(candidates + more)
     else:
         # 默认 S2：分两档 + 一跳扩展
         seeds = ss.search_papers_two_tiered(
@@ -573,6 +601,15 @@ def build_concept_graph(
             classic_limit=classic_limit,
             recent_limit=recent_limit,
         )
+        # 额外子查询：每条独立搜然后合并 seeds（去重后再 expand_one_hop）
+        if extra_queries:
+            for q in extra_queries:
+                if not q or not q.strip():
+                    continue
+                more = ss.search_papers_two_tiered(
+                    q, classic_limit=classic_limit // 2, recent_limit=recent_limit // 2,
+                )
+                seeds = _dedup_papers_by_id(seeds + more)
         candidates = expand_one_hop(seeds, max_refs_per_paper, max_cits_per_paper)
 
     # Step 3: 清洗 + 剪枝

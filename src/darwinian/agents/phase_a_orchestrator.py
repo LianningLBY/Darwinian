@@ -24,6 +24,7 @@ import sys
 from typing import Callable
 
 from langchain_core.language_models import BaseChatModel
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from darwinian.state import (
     PaperEvidence,
@@ -34,6 +35,8 @@ from darwinian.state import (
 from darwinian.tools.arxiv_latex_fetcher import fetch_arxiv_latex, render_for_llm
 from darwinian.tools.paper_evidence_extractor import batch_extract_evidence
 from darwinian.tools.semantic_scholar import get_paper_details
+from darwinian.utils.json_parser import parse_llm_json
+from darwinian.utils.llm_retry import invoke_with_retry
 from darwinian.utils.knowledge_graph import build_concept_graph
 
 
@@ -60,13 +63,21 @@ def build_research_material_pack(
     Returns:
         完整 ResearchMaterialPack，可直接喂给 elaborate_proposal_from_pack
     """
+    # ---- Step 0: query expansion（让 LLM 把宽方向拆成具体子查询）----
+    # 防止 S2 关键词搜索把 "LLM inference acceleration" 这种宽词命中泛论文
+    # （GPT-3 / Llama 2 / PyTorch 等碾压方向相关的 LayerSkip / DEL / QSpec）
+    extra_queries = _expand_search_queries(direction, extractor_llm)
+    print(f"[phase_a] Step 0/4: 子查询扩展 = {extra_queries}", file=sys.stderr)
+
     # ---- Step 1: 文献发现 + 实体表 + 结构洞候选 ----
-    print(f"[phase_a] Step 1/4: build_concept_graph(direction={direction[:60]!r})", file=sys.stderr)
+    print(f"[phase_a] Step 1/4: build_concept_graph(direction={direction[:60]!r}, "
+          f"+{len(extra_queries)} extra_queries)", file=sys.stderr)
     graph = build_concept_graph(
         research_direction=direction,
         core_problem=direction,
         llm=extractor_llm,
         backend=backend,
+        extra_queries=extra_queries,
     )
     print(f"[phase_a] graph: {len(graph.papers)} papers, "
           f"{len(graph.entities)} entities, {len(graph.limitations)} limitations, "
@@ -125,6 +136,61 @@ def build_research_material_pack(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+_EXPAND_QUERIES_SYSTEM_PROMPT = """你是 academic search query 专家。给定一个研究方向描述，
+你要拆出 3-5 个**具体且互补的**学术搜索关键词组，覆盖该方向的核心子赛道和方法名。
+
+输出严格 JSON：
+{"queries": ["query1", "query2", ...]}
+
+【关键约束】
+1. 每条 query 是 3-8 个英文词的关键词组（不是一句话）
+2. 优先使用方向里出现的具体方法名 / 数据集 / 现象，而不是宽词
+   - 不好: "LLM efficient inference"  → S2 会命中所有 LLM 论文
+   - 好:   "self-speculative decoding draft model"
+3. 每条 query 应能命中 8-30 篇方向相关论文（不要太宽不要太窄）
+4. 多条 query 之间应覆盖不同子赛道，不要互相重复
+5. 输出 3-5 条，不超过 5 条
+
+示例（方向='LLM inference acceleration speculative decoding quantization'）：
+{"queries": [
+  "self-speculative decoding draft model",
+  "speculative decoding tree attention LLM",
+  "Medusa EAGLE LayerSkip inference",
+  "mixed precision quantization LLM",
+  "early exit transformer inference"
+]}
+
+输出严格 JSON，不要 markdown 包裹。
+"""
+
+
+def _expand_search_queries(
+    direction: str,
+    llm: BaseChatModel,
+    *,
+    max_queries: int = 5,
+) -> list[str]:
+    """
+    用便宜 LLM 把宽研究方向拆成 3-5 条具体子查询。
+
+    LLM 失败时返空列表（让 build_concept_graph 退化为单查询行为，0 回归风险）。
+    """
+    try:
+        response = invoke_with_retry(llm, [
+            SystemMessage(content=_EXPAND_QUERIES_SYSTEM_PROMPT),
+            HumanMessage(content=f"研究方向：{direction}\n\n请输出 3-5 条具体子查询。"),
+        ])
+        raw = parse_llm_json(response.content)
+        queries = raw.get("queries") or []
+        # 清洗：strip + 非空 + 截到 max_queries
+        cleaned = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
+        return cleaned[:max_queries]
+    except Exception as e:
+        print(f"[phase_a] _expand_search_queries 失败: {type(e).__name__}: {e}",
+              file=sys.stderr)
+        return []
+
 
 def _select_top_papers_by_relevance(
     graph: "ConceptGraph",

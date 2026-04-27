@@ -624,3 +624,41 @@ class TestBuildConceptGraph:
                     llm=fake_llm, backend="s2",
                 )
         assert len(graph_s2.novel_pair_hints) == 0
+
+
+# ===========================================================================
+# Fix L1: _dedup_papers_by_id + build_concept_graph 接 extra_queries
+# ===========================================================================
+
+from darwinian.utils.knowledge_graph import _dedup_papers_by_id
+
+
+class TestDedupPapersById:
+    def test_basic_dedup_keeps_first(self):
+        papers = [
+            {"paperId": "A", "title": "first"},
+            {"paperId": "B", "title": "two"},
+            {"paperId": "A", "title": "duplicate, dropped"},
+            {"paperId": "C", "title": "three"},
+        ]
+        out = _dedup_papers_by_id(papers)
+        assert [p["title"] for p in out] == ["first", "two", "three"]
+
+    def test_handles_paper_id_alias(self):
+        """支持 'paperId' 和 'paper_id' 两种 key（兼容 S2 和 PaperInfo）"""
+        papers = [
+            {"paperId": "A"},
+            {"paper_id": "A"},   # 同 id 不同 key
+            {"paperId": "B"},
+        ]
+        out = _dedup_papers_by_id(papers)
+        assert len(out) == 2
+
+    def test_empty_id_skipped(self):
+        papers = [{"paperId": ""}, {"paperId": None}, {"paperId": "C"}]
+        out = _dedup_papers_by_id(papers)
+        assert len(out) == 1
+        assert out[0]["paperId"] == "C"
+
+    def test_empty_input(self):
+        assert _dedup_papers_by_id([]) == []

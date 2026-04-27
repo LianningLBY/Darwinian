@@ -435,3 +435,114 @@ class TestSelectTopPapersByRelevance:
         graph = ConceptGraph(papers=papers, entities=[])
         assert len(_select_top_papers_by_relevance(graph, top_k=3)) == 3
         assert len(_select_top_papers_by_relevance(graph, top_k=20)) == 10
+
+
+# ===========================================================================
+# Fix L1: query expansion (_expand_search_queries + extra_queries 串接)
+# ===========================================================================
+
+import json as _json
+from darwinian.agents.phase_a_orchestrator import _expand_search_queries
+
+
+class TestExpandSearchQueries:
+    def test_happy_path(self):
+        fake_resp = MagicMock(content=_json.dumps({
+            "queries": [
+                "self-speculative decoding draft model",
+                "Medusa EAGLE LayerSkip",
+                "mixed precision quantization LLM",
+            ]
+        }))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp):
+            qs = _expand_search_queries("LLM speculative decoding", MagicMock())
+        assert len(qs) == 3
+        assert "self-speculative decoding draft model" in qs
+
+    def test_strips_whitespace_and_filters_empty(self):
+        fake_resp = MagicMock(content=_json.dumps({
+            "queries": ["  query A  ", "", "   ", None, "query B", 42]
+        }))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp):
+            qs = _expand_search_queries("x", MagicMock())
+        # 留下 strip 后非空的字符串
+        assert qs == ["query A", "query B"]
+
+    def test_caps_at_max_queries(self):
+        fake_resp = MagicMock(content=_json.dumps({
+            "queries": [f"q{i}" for i in range(10)]
+        }))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp):
+            qs = _expand_search_queries("x", MagicMock(), max_queries=3)
+        assert len(qs) == 3
+        assert qs == ["q0", "q1", "q2"]
+
+    def test_llm_exception_returns_empty(self):
+        """LLM 报错时返空列表（让 build_concept_graph 降级到单查询）"""
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   side_effect=ConnectionError("network")):
+            qs = _expand_search_queries("x", MagicMock())
+        assert qs == []
+
+    def test_unparseable_json_returns_empty(self):
+        fake_resp = MagicMock(content="not json at all")
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp):
+            qs = _expand_search_queries("x", MagicMock())
+        assert qs == []
+
+    def test_missing_queries_field_returns_empty(self):
+        fake_resp = MagicMock(content=_json.dumps({"foo": "bar"}))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp):
+            qs = _expand_search_queries("x", MagicMock())
+        assert qs == []
+
+
+class TestOrchestratorPassesExtraQueries:
+    """end-to-end 验证：orchestrator 调 _expand_search_queries 后把结果传给 build_concept_graph"""
+
+    def test_extra_queries_threaded_through(self):
+        # mock LLM 返 3 条 query
+        fake_resp = MagicMock(content=_json.dumps({
+            "queries": ["self-speculative decoding", "Medusa EAGLE", "mixed precision LLM"]
+        }))
+        # mock build_concept_graph 返空 graph
+        empty_graph = ConceptGraph()
+
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp), \
+             patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
+                   return_value=empty_graph) as mock_bg, \
+             patch("darwinian.agents.phase_a_orchestrator.batch_extract_evidence",
+                   return_value=[]):
+            build_research_material_pack(
+                direction="LLM inference acceleration",
+                constraints=_constraints(),
+                extractor_llm=MagicMock(), evidence_llm=MagicMock(),
+            )
+        # build_concept_graph 应收到 extra_queries
+        assert mock_bg.call_count == 1
+        kw = mock_bg.call_args.kwargs
+        assert kw["extra_queries"] == ["self-speculative decoding",
+                                        "Medusa EAGLE", "mixed precision LLM"]
+
+    def test_query_expansion_failure_does_not_block(self):
+        """LLM 调失败时 extra_queries=[]，但管线继续走"""
+        empty_graph = ConceptGraph()
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   side_effect=ConnectionError("net")), \
+             patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
+                   return_value=empty_graph) as mock_bg, \
+             patch("darwinian.agents.phase_a_orchestrator.batch_extract_evidence",
+                   return_value=[]):
+            build_research_material_pack(
+                direction="x", constraints=_constraints(),
+                extractor_llm=MagicMock(), evidence_llm=MagicMock(),
+            )
+        # 仍然调 build_concept_graph，extra_queries 是空列表（不是 None，方便后续判断）
+        assert mock_bg.call_count == 1
+        assert mock_bg.call_args.kwargs["extra_queries"] == []
