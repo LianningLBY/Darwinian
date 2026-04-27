@@ -153,3 +153,44 @@ commit f4ab5de → 33a683f 期间：
 
 - test_state.py: +6 个 TestClass / +16 个 test (TestStructuralHoleHook×3, TestResearchConstraints×2, TestExpectedOutcomes×2, TestResearchProposalExpectedOutcomesField×2, TestResearchMaterialPack×3, TestDebate×4)
 - 总测试: 308 → 324 pass (2 pre-existing fail 未变)
+
+---
+
+## 2026-04-26 | seed_renderer + diff demo
+
+**Commit**: `4fbe487` (feat(seed_renderer): ResearchProposal → QuantSkip 风格 seed.md)
+
+### 关键决策
+
+1. **先做 render-only diff，不接 LLM**
+   - 问题：直接跑 elaborator + LLM 看输出，成本高且无法分离"schema 不全"和"prompt 不够好"两类问题
+   - 决策：手工构造一份"理想 ResearchProposal"作 ground truth，渲染后对照 QuantSkip 原文
+   - 收益：先确认 schema + 渲染层覆盖度 100%，再去优化 LLM 端；定位问题精度高
+
+2. **缺字段渲染 '(待补)' 而非 raise**
+   - 问题：LangGraph 节点中如果 elaborator 漏字段就让渲染崩溃，会让整条链路在 Phase 1 末尾失败
+   - 决策：renderer 是 best-effort，缺字段画占位符，让 markdown 仍能完整渲出
+   - 配套：占位符 '(待补)' 显眼，HITL/QA 看一眼就知道哪里要补
+
+3. **key_references_formatted 不前缀 short_name**
+   - 问题：demo 里写成 `f"{ev.short_name}: {ev.title} ({ev.venue})"` 渲出来变成
+     "LayerSkip: LayerSkip: Enabling..."（重复）
+   - 原因：论文 title 通常已以方法名开头（"LayerSkip: ..."、"DEL: ..."、"RAMP: ..."）
+   - 决策：直接用 `f"{ev.title} ({ev.venue})"`，不重复前缀
+   - 配套：未来 elaborator 输出时也按此格式
+
+### diff vs QuantSkip 原文的发现
+
+渲染输出基本对齐，**信息密度足够**。仅 3 处 cosmetic 已修：
+- 标题与 metadata 块之间空行
+- metadata 块四行用 markdown 硬换行 `  \n` 连续显示
+- references 不前缀 short_name 防重复
+
+**schema 完全覆盖** QuantSkip 所有 section，无需新增字段。
+
+### 留给后续的事
+
+- elaborator 当前接 ConceptGraph，未接 ResearchMaterialPack — 下一个 task 升级
+- diff demo 只是手工构造的 "ideal proposal"，没验证 LLM 能产到这个质量 —
+  接好 elaborator 后跑实测才能验证
+- StructuralHoleHook 已构造但 elaborator 没读 — 接口升级时一起接
