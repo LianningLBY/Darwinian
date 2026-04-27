@@ -1,19 +1,22 @@
 """
 QuantSkip seed diff 实验
 
-目的：测试 v3 schema + seed_renderer 能不能复现 QuantSkip 风格的 seed.md。
-这个脚本不调 LLM——它手工构造一份"理想 ResearchProposal"（模拟 elaborator 完美输出），
-然后用 seed_renderer 渲染成 markdown。把渲染输出 diff vs QuantSkip 原文，
-就能定位 schema/renderer 还差什么。
+两种 mode：
 
-用法：
+(1) IDEAL mode（默认，无需 API key）
+    手工构造"理想 ResearchProposal"（模拟 elaborator 完美输出）→ seed_renderer
+    用于验证 schema + renderer 覆盖度。
+
     PYTHONPATH=src python examples/diff_quantskip_seed.py > /tmp/our_seed.md
-    diff /tmp/our_seed.md path/to/quantskip_original.md
 
-模式（待 elaborator 接 ResearchMaterialPack 后启用）：
-    LIVE_LLM=1 python examples/diff_quantskip_seed.py
-    -> 调 elaborator + LLM 生成；目前 elaborator 还在用 ConceptGraph 接口，
-       没接 ResearchMaterialPack，本模式暂未实现
+(2) LIVE mode（需 .env 中 MINIMAX_API_KEY）
+    调 elaborate_proposal_from_pack(skeleton, material_pack, llm) → seed_renderer
+    用于看真实 LLM 给的 proposal 离 QuantSkip 多远。
+
+    LIVE_LLM=1 PYTHONPATH=src python examples/diff_quantskip_seed.py > /tmp/llm_seed.md
+
+    diff /tmp/our_seed.md /tmp/llm_seed.md   # IDEAL vs LLM
+    diff /tmp/llm_seed.md path/to/quantskip_original.md   # LLM vs ground truth
 """
 
 from __future__ import annotations
@@ -378,9 +381,38 @@ def build_ideal_proposal(pack: ResearchMaterialPack) -> ResearchProposal:
 
 def main() -> None:
     pack = build_material_pack()
-    proposal = build_ideal_proposal(pack)
+
+    if os.environ.get("LIVE_LLM") == "1":
+        proposal = _live_elaborate(pack)
+    else:
+        proposal = build_ideal_proposal(pack)
+
+    if proposal is None:
+        print("# (proposal 生成失败)")
+        return
     md = render_proposal(proposal, material_pack=pack)
     print(md)
+
+
+def _live_elaborate(pack: ResearchMaterialPack) -> ResearchProposal | None:
+    """LIVE mode：调 MiniMax LLM 跑 elaborate_proposal_from_pack"""
+    from dotenv import load_dotenv
+    load_dotenv()
+    api_key = os.environ.get("MINIMAX_API_KEY")
+    if not api_key:
+        print("# 错误：LIVE_LLM=1 但环境无 MINIMAX_API_KEY", file=sys.stderr)
+        return None
+    from darwinian.agents.proposal_elaborator import elaborate_proposal_from_pack
+    from darwinian.llms import ChatMiniMax
+    llm = ChatMiniMax(model="MiniMax-M2.7", api_key=api_key, max_tokens=8192)
+
+    # 用 ideal proposal 的 skeleton 作为输入骨架
+    ideal = build_ideal_proposal(pack)
+    return elaborate_proposal_from_pack(
+        skeleton=ideal.skeleton,
+        material_pack=pack,
+        llm=llm,
+    )
 
 
 if __name__ == "__main__":

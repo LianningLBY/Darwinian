@@ -34,6 +34,7 @@ pytest tests/test_graphs/test_routing.py -v
 | `tests/test_tools/test_knowledge_graph.py` | expand_one_hop、filter_and_rank、normalize、word-boundary (bert⊄bertopic)、批抽取、canonicalize、相关性裁剪、结构洞、充分性、build_concept_graph 编排 |
 | `tests/test_agents/test_bottleneck_miner.py` | ConceptGraph 管道接入、banned_keywords 在 entity 层过滤、formatters、降级 prompt |
 | `tests/test_agents/test_hypothesis_generator.py` | 硬约束 5 种 error code、候选建议 (word-boundary+兜底)、结构化反馈、step 7.5 组合查重、v2/降级双路径 |
+| `tests/test_agents/test_proposal_elaborator.py` | v2 ConceptGraph 路径（_build_proposal / _validate 6 种 error code / 重试 / node wrapper）+ v3 ResearchMaterialPack 路径（按 category 分组 prompt / forbidden_techniques 校验 / structured outcomes / resource estimate 兜底） |
 | `tests/test_graphs/test_routing.py` | critic_router / execution_router / final_router 路由逻辑 |
 
 ### 预挂测试（基线，非 Phase 1 v2 引入）
