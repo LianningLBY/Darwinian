@@ -35,6 +35,7 @@ pytest tests/test_graphs/test_routing.py -v
 | `tests/test_agents/test_bottleneck_miner.py` | ConceptGraph 管道接入、banned_keywords 在 entity 层过滤、formatters、降级 prompt |
 | `tests/test_agents/test_hypothesis_generator.py` | 硬约束 5 种 error code、候选建议 (word-boundary+兜底)、结构化反馈、step 7.5 组合查重、v2/降级双路径 |
 | `tests/test_agents/test_proposal_elaborator.py` | v2 ConceptGraph 路径（_build_proposal / _validate 6 种 error code / 重试 / node wrapper）+ v3 ResearchMaterialPack 路径（按 category 分组 prompt / forbidden_techniques 校验 / structured outcomes / resource estimate 兜底） |
+| `tests/test_agents/test_phase_a_orchestrator.py` | helper（_looks_like_arxiv_id / _format_evidence_id / _bucket_by_year）/ _resolve_arxiv_ids 走 S2（含异常吞掉）/ _make_full_text_provider 按 evidence_paper_id 反查 / build_research_material_pack 端到端串接（5 个外部依赖全 mock） |
 | `tests/test_graphs/test_routing.py` | critic_router / execution_router / final_router 路由逻辑 |
 
 ### 预挂测试（基线，非 Phase 1 v2 引入）

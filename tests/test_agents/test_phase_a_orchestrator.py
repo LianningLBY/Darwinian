@@ -1,0 +1,364 @@
+"""
+phase_a_orchestrator 单元测试
+
+不打真实 S2 / arxiv / LLM —— 全部 mock。验证：
+- helper 函数（_looks_like_arxiv_id / _format_evidence_id / _bucket_by_year）
+- _resolve_arxiv_ids 走 S2 缓存正常
+- _make_full_text_provider 正确按 paper_id 反查 arxiv_id
+- build_research_material_pack 端到端串接（5 个外部依赖全 mock）
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from darwinian.agents.phase_a_orchestrator import (
+    build_research_material_pack,
+    _bucket_by_year,
+    _format_evidence_id,
+    _looks_like_arxiv_id,
+    _make_full_text_provider,
+    _resolve_arxiv_ids,
+)
+from darwinian.state import (
+    ConceptGraph,
+    Entity,
+    LimitationRef,
+    PaperEvidence,
+    PaperInfo,
+    QuantitativeClaim,
+    ResearchConstraints,
+)
+
+
+# ---------------------------------------------------------------------------
+# fixtures
+# ---------------------------------------------------------------------------
+
+def _mk_paper(paper_id, year=2024, citations=10, title="t", abstract="a") -> PaperInfo:
+    return PaperInfo(
+        paper_id=paper_id, title=title, abstract=abstract,
+        year=year, citation_count=citations, source="semantic_scholar",
+    )
+
+
+def _constraints() -> ResearchConstraints:
+    return ResearchConstraints(
+        gpu_count=4, gpu_hours_budget=672.0, wall_clock_days=7,
+        forbidden_techniques=["GRPO"], target_venues=["NeurIPS 2026"],
+    )
+
+
+# ---------------------------------------------------------------------------
+# helper 函数
+# ---------------------------------------------------------------------------
+
+class TestLooksLikeArxivId:
+    def test_yymm_5digit_match(self):
+        assert _looks_like_arxiv_id("2404.16710")
+        assert _looks_like_arxiv_id("2603.17891")
+
+    def test_with_version_suffix(self):
+        assert _looks_like_arxiv_id("2404.16710v2")
+
+    def test_yymm_4digit_match(self):
+        # arxiv 早期格式
+        assert _looks_like_arxiv_id("1706.0123")
+
+    def test_s2_paperid_no_match(self):
+        # S2 paperId 是 hex 字符串
+        assert not _looks_like_arxiv_id("abc123def4567890abcdef0123456789abcdef01")
+
+    def test_doi_no_match(self):
+        assert not _looks_like_arxiv_id("10.1145/3534678.3539107")
+
+    def test_empty_no_match(self):
+        assert not _looks_like_arxiv_id("")
+
+
+class TestFormatEvidenceId:
+    def test_arxiv_id_known(self):
+        p = _mk_paper("S2_HEX_001")
+        evid = _format_evidence_id(p, {"S2_HEX_001": "2404.16710"})
+        assert evid == "arxiv:2404.16710"
+
+    def test_arxiv_id_missing_falls_back(self):
+        p = _mk_paper("S2_HEX_002")
+        evid = _format_evidence_id(p, {"S2_HEX_002": ""})
+        assert evid == "s2:S2_HEX_002"
+
+    def test_paper_id_not_in_map(self):
+        p = _mk_paper("S2_HEX_003")
+        evid = _format_evidence_id(p, {})
+        assert evid == "s2:S2_HEX_003"
+
+
+class TestBucketByYear:
+    def test_basic_bucketing(self):
+        papers = [
+            _mk_paper("p1", year=2022),
+            _mk_paper("p2", year=2023),
+            _mk_paper("p3", year=2025),
+            _mk_paper("p4", year=2026),
+        ]
+        amap = {"p1": "2202.0001", "p2": "2304.0001", "p3": "2503.0001", "p4": "2603.0001"}
+        b = _bucket_by_year(papers, amap)
+        assert "foundational_pre_2024" in b
+        assert "hot_2025_2026" in b
+        assert "arxiv:2202.0001" in b["foundational_pre_2024"]
+        assert "arxiv:2304.0001" in b["foundational_pre_2024"]
+        assert "arxiv:2503.0001" in b["hot_2025_2026"]
+        assert "arxiv:2603.0001" in b["hot_2025_2026"]
+
+    def test_2024_falls_in_neither_bucket(self):
+        """2024 是过渡年，不归 pre_2024 也不归 hot_2025_2026"""
+        papers = [_mk_paper("p1", year=2024)]
+        b = _bucket_by_year(papers, {"p1": "2404.0001"})
+        # 2024 既不是 < 2024 也不是 >= 2025 → 不进任何桶
+        all_ids = [pid for pids in b.values() for pid in pids]
+        assert "arxiv:2404.0001" not in all_ids
+
+    def test_year_zero_skipped(self):
+        """year=0 表示未知 → 不进任何桶"""
+        papers = [_mk_paper("p1", year=0)]
+        b = _bucket_by_year(papers, {"p1": ""})
+        all_ids = [pid for pids in b.values() for pid in pids]
+        assert "s2:p1" not in all_ids
+
+    def test_empty_buckets_dropped(self):
+        """全部论文都在 2024 → 返回空 dict（无桶）"""
+        papers = [_mk_paper("p1", year=2024)]
+        b = _bucket_by_year(papers, {"p1": "2404.0001"})
+        assert b == {}
+
+
+# ---------------------------------------------------------------------------
+# _resolve_arxiv_ids
+# ---------------------------------------------------------------------------
+
+class TestResolveArxivIds:
+    def test_arxiv_format_uses_directly(self):
+        """paper_id 已经是 arxiv 格式时不调 S2"""
+        p = _mk_paper("2404.16710")
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details") as mock_s2:
+            result = _resolve_arxiv_ids([p])
+        assert mock_s2.call_count == 0
+        assert result["2404.16710"] == "2404.16710"
+
+    def test_s2_paperid_calls_get_details(self):
+        p = _mk_paper("S2_HEX_001")
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value={"externalIds": {"ArXiv": "2404.16710"}}) as mock_s2:
+            result = _resolve_arxiv_ids([p])
+        mock_s2.assert_called_once_with("S2_HEX_001", fields="externalIds")
+        assert result["S2_HEX_001"] == "2404.16710"
+
+    def test_no_arxiv_id_returns_empty(self):
+        """S2 返回但 externalIds 没 ArXiv → ""（不报错）"""
+        p = _mk_paper("S2_HEX_002")
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value={"externalIds": {"DOI": "10.1145/xxx"}}):
+            result = _resolve_arxiv_ids([p])
+        assert result["S2_HEX_002"] == ""
+
+    def test_s2_returns_none(self):
+        p = _mk_paper("S2_HEX_003")
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value=None):
+            result = _resolve_arxiv_ids([p])
+        assert result["S2_HEX_003"] == ""
+
+    def test_s2_raises_swallowed(self):
+        """S2 调用抛异常时跳过该论文，不让整个流程崩"""
+        p = _mk_paper("S2_HEX_004")
+        with patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   side_effect=ConnectionError("network")):
+            result = _resolve_arxiv_ids([p])
+        assert result["S2_HEX_004"] == ""
+
+    def test_empty_paper_id_skipped(self):
+        p = PaperInfo(paper_id="")
+        result = _resolve_arxiv_ids([p])
+        assert "" not in result
+
+
+# ---------------------------------------------------------------------------
+# _make_full_text_provider
+# ---------------------------------------------------------------------------
+
+class TestFullTextProvider:
+    def test_arxiv_evidence_id_resolves(self):
+        """evidence_paper_id 形如 'arxiv:2404.16710' 时直接解析"""
+        amap = {"S2_HEX_001": "2404.16710"}
+        provider = _make_full_text_provider(amap)
+
+        mock_src = MagicMock(has_full_text=True)
+        with patch("darwinian.agents.phase_a_orchestrator.fetch_arxiv_latex",
+                   return_value=mock_src) as mock_fetch:
+            with patch("darwinian.agents.phase_a_orchestrator.render_for_llm",
+                       return_value="rendered text 18000 chars"):
+                text = provider("arxiv:2404.16710")
+        mock_fetch.assert_called_once_with("2404.16710")
+        assert text == "rendered text 18000 chars"
+
+    def test_s2_evidence_id_resolves(self):
+        """evidence_paper_id 形如 's2:hex' 时通过 amap 反查"""
+        amap = {"S2_HEX_001": "2404.16710"}
+        provider = _make_full_text_provider(amap)
+
+        mock_src = MagicMock(has_full_text=True)
+        with patch("darwinian.agents.phase_a_orchestrator.fetch_arxiv_latex",
+                   return_value=mock_src) as mock_fetch:
+            with patch("darwinian.agents.phase_a_orchestrator.render_for_llm",
+                       return_value="text"):
+                text = provider("s2:S2_HEX_001")
+        mock_fetch.assert_called_once_with("2404.16710")
+        assert text == "text"
+
+    def test_no_arxiv_id_returns_empty(self):
+        """没 arxiv_id 时返空字符串（让 batch_extract_evidence 走 abstract-only）"""
+        provider = _make_full_text_provider({})
+        assert provider("s2:UNKNOWN") == ""
+
+    def test_fetch_returns_none_returns_empty(self):
+        amap = {"S2_HEX_001": "2404.16710"}
+        provider = _make_full_text_provider(amap)
+        with patch("darwinian.agents.phase_a_orchestrator.fetch_arxiv_latex",
+                   return_value=None):
+            assert provider("arxiv:2404.16710") == ""
+
+    def test_no_full_text_flag_returns_empty(self):
+        amap = {"S2_HEX_001": "2404.16710"}
+        provider = _make_full_text_provider(amap)
+        mock_src = MagicMock(has_full_text=False)
+        with patch("darwinian.agents.phase_a_orchestrator.fetch_arxiv_latex",
+                   return_value=mock_src):
+            assert provider("arxiv:2404.16710") == ""
+
+    def test_fetch_raises_swallowed(self):
+        amap = {"S2_HEX_001": "2404.16710"}
+        provider = _make_full_text_provider(amap)
+        with patch("darwinian.agents.phase_a_orchestrator.fetch_arxiv_latex",
+                   side_effect=Exception("network")):
+            assert provider("arxiv:2404.16710") == ""
+
+
+# ---------------------------------------------------------------------------
+# build_research_material_pack 端到端
+# ---------------------------------------------------------------------------
+
+class TestBuildMaterialPack:
+    def test_end_to_end_assembly(self):
+        """5 个外部依赖全 mock，验证 orchestrator 把它们正确串起来"""
+        # mock build_concept_graph 的产出
+        mock_papers = [
+            _mk_paper("S2_HEX_001", year=2024, citations=200,
+                       title="LayerSkip", abstract="abs1"),
+            _mk_paper("S2_HEX_002", year=2025, citations=100,
+                       title="DEL", abstract="abs2"),
+        ]
+        mock_graph = ConceptGraph(
+            papers=mock_papers,
+            entities=[Entity(canonical_name="layerskip", type="method", paper_ids=["S2_HEX_001"])],
+            limitations=[LimitationRef(id="L01", text="finetune required",
+                                        source_paper_id="S2_HEX_001")],
+        )
+
+        # mock 深抽取的产出
+        mock_evidence = [
+            PaperEvidence(
+                paper_id="arxiv:2404.16710", title="LayerSkip", short_name="LayerSkip",
+                venue="ACL 2024", year=2024,
+                quantitative_claims=[QuantitativeClaim(metric_name="speedup",
+                                                        metric_value="2.16x")],
+                headline_result="2.16x speedup", relation_to_direction="extends",
+            ),
+            PaperEvidence(
+                paper_id="arxiv:2510.del", title="DEL", short_name="DEL",
+                venue="COLM 2025", year=2025,
+                quantitative_claims=[QuantitativeClaim(metric_name="speedup",
+                                                        metric_value="2.62x")],
+                headline_result="2.62x speedup", relation_to_direction="baseline",
+            ),
+        ]
+
+        with patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
+                   return_value=mock_graph) as mock_bg, \
+             patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   side_effect=[
+                       {"externalIds": {"ArXiv": "2404.16710"}},
+                       {"externalIds": {"ArXiv": "2510.del"}},
+                   ]) as mock_gd, \
+             patch("darwinian.agents.phase_a_orchestrator.batch_extract_evidence",
+                   return_value=mock_evidence) as mock_ext:
+            pack = build_research_material_pack(
+                direction="LLM inference acceleration",
+                constraints=_constraints(),
+                extractor_llm=MagicMock(),
+                evidence_llm=MagicMock(),
+                top_k_evidence=12,
+            )
+
+        # 1. concept_graph 被 build_concept_graph 调一次
+        assert mock_bg.call_count == 1
+        # 2. get_paper_details 调 2 次（每个 top paper 一次）
+        assert mock_gd.call_count == 2
+        # 3. batch_extract_evidence 调 1 次，第一个参数是 list[dict]
+        assert mock_ext.call_count == 1
+        call_kwargs = mock_ext.call_args
+        papers_arg = call_kwargs.args[0]
+        assert len(papers_arg) == 2
+        assert papers_arg[0]["paper_id"] == "arxiv:2404.16710"
+        assert papers_arg[0]["title"] == "LayerSkip"
+
+        # 4. 装配的 ResearchMaterialPack
+        assert pack.direction == "LLM inference acceleration"
+        assert pack.constraints.gpu_hours_budget == 672.0
+        assert len(pack.paper_evidence) == 2
+        assert pack.concept_graph is mock_graph
+        assert pack.structural_hole_hooks == []   # 留给后续
+        # timeline_signals: LayerSkip 2024 不进桶；DEL 2025 进 hot_2025_2026
+        assert pack.timeline_signals == {"hot_2025_2026": ["arxiv:2510.del"]}
+
+    def test_top_k_truncation(self):
+        """top_k_evidence 截断按 citation_count 排序"""
+        mock_papers = [
+            _mk_paper(f"P{i}", year=2024, citations=100 - i)
+            for i in range(20)
+        ]
+        mock_graph = ConceptGraph(papers=mock_papers)
+
+        with patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
+                   return_value=mock_graph), \
+             patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value={"externalIds": {}}), \
+             patch("darwinian.agents.phase_a_orchestrator.batch_extract_evidence",
+                   return_value=[]) as mock_ext:
+            build_research_material_pack(
+                direction="x", constraints=_constraints(),
+                extractor_llm=MagicMock(), evidence_llm=MagicMock(),
+                top_k_evidence=5,
+            )
+        # 只对 top-5 调 batch_extract_evidence
+        papers_arg = mock_ext.call_args.args[0]
+        assert len(papers_arg) == 5
+        # 按 citation 降序：P0 (100), P1 (99), ...
+        assert papers_arg[0]["paper_id"] == "s2:P0"
+        assert papers_arg[4]["paper_id"] == "s2:P4"
+
+    def test_empty_graph_still_returns_valid_pack(self):
+        """build_concept_graph 返空（如 S2 全挂）时 orchestrator 不崩"""
+        empty_graph = ConceptGraph()
+        with patch("darwinian.agents.phase_a_orchestrator.build_concept_graph",
+                   return_value=empty_graph), \
+             patch("darwinian.agents.phase_a_orchestrator.batch_extract_evidence",
+                   return_value=[]):
+            pack = build_research_material_pack(
+                direction="x", constraints=_constraints(),
+                extractor_llm=MagicMock(), evidence_llm=MagicMock(),
+            )
+        assert pack.paper_evidence == []
+        assert pack.timeline_signals == {}
+        assert pack.concept_graph is empty_graph
