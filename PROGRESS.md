@@ -249,3 +249,56 @@ commit f4ab5de → 33a683f 期间：
 - 如果 LLM 输出离 ideal 差距小 → 进入 Phase A 调研 Agent 自动构造
   ResearchMaterialPack（不再手工）
 - 如果差距大 → 改 SYSTEM_PROMPT_V3，先把单 branch 质量打稳
+
+---
+
+## 2026-04-26 | LIVE 实测发现 + Fix A/B（DEL 标题幻觉 + 写作 phase）
+
+**Commit**: `5cacc2e` (fix(elaborator): Fix A 强制 pack title 防幻觉 + Fix B 写作 phase 不算 GPU 小时)
+
+### LIVE 实测发现的 schema/prompt 没抓到的问题
+
+LIVE 模式（`LIVE_LLM=1` 跑 examples/diff_quantskip_seed.py）首次实测，LLM 第 1 次输出
+就通过了所有 8 项校验——好消息。但人工对照 QuantSkip 原文发现 2 个校验抓不到的问题：
+
+1. **DEL 论文标题被 LLM 瞎编**
+   - pack 里给的真实 title: "DEL: Context-Aware Dynamic Exit Layer for Efficient Self-Speculative Decoding"
+   - LLM 输出的 key_references_formatted 写成: "DEL: Draft-Enhanced Speculative Decoding"
+   - 根因：LLM 看到缩写 DEL + speculative decoding 上下文，自己脑补了一个错的全称
+   - 严重度：评审一查 arxiv 发现不存在这个论文 → credibility 当场崩塌
+
+2. **"Paper Writing" phase 算 48 GPU 小时**
+   - LLM 把"写论文 + 投稿 + 准备 supplementary"作为 phase 6，标 expected_compute_hours=48.0
+   - 写作不消耗 GPU，但 demo 的 budget=672h（4 卡×168h），phases 总和 328h 没超预算
+   - 所以 OVER_BUDGET 没触发，但语义上 GPU 时间被错误占用
+
+### 关键决策
+
+1. **Fix A 用"始终重建"而非"校验+反馈"路线**
+   - 备选方案：加 HALLUCINATED_TITLE 校验 + 反馈让 LLM 修
+   - 决策：直接 _build_proposal_v3 始终从 pack.paper_evidence 重建 references_formatted，
+     无视 LLM 输出
+   - 理由：title 是结构化数据已在 pack 里，没必要让 LLM 复述；让 LLM 写就给了它
+     幻觉空间。**结构化字段尽量绕过 LLM 是降幻觉的最简策略**
+   - 代价：失去 LLM 可能给的 polish（如调整作者顺序），但场景不需要
+
+2. **Fix B 的关键词列表加入 supplementary / camera-ready 等**
+   - 不只抓"Paper Writing"，还包括 "submission" / "manuscript" / "supplementary" /
+     "camera ready"——所有非 GPU 计算的论文准备工作
+   - 反馈给 LLM 时给两条出路："要么删掉，要么 expected_compute_hours 设 0"——
+     不强制删 phase 是为了保留"项目时间表"信息（便于人看整个研究节奏）
+
+### 踩的坑
+
+1. **LLM 看缩写脑补全称是常见模式**
+   - 不限于 DEL —— 任何首字母缩写论文都可能被 LLM 误展开（GPT/BERT 等大众缩写没问题，
+     但小众方法名很容易出事）
+   - 预防：所有 LLM 引用论文标题的字段，**都应该绕开 LLM 直接从结构化源拼**
+   - 同样需要排查：proposal 里其他可能展开缩写的字段（motivation 段、proposed_method）
+
+### 测试增量
+
+- TestFixAReferencesFromPack ×2 (LLM 瞎编标题被无视 / 未知 paper_id 被跳过)
+- TestFixBWritingPhaseHasGpuHours ×5 (写作 phase 触发 / 0 小时白名单 /
+  多关键词 / 无关 phase 不误抓 / feedback 拼装含 offender)
+- 总测试: 362 → 369 pass (2 pre-existing fail 未变)
