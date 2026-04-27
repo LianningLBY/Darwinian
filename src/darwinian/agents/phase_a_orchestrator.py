@@ -72,14 +72,16 @@ def build_research_material_pack(
           f"{len(graph.entities)} entities, {len(graph.limitations)} limitations, "
           f"{len(graph.novel_pair_hints)} novel pairs", file=sys.stderr)
 
-    # ---- Step 2: 选 top-K paper 做深抽取（按引用数）----
-    sorted_papers = sorted(
-        graph.papers,
-        key=lambda p: p.citation_count or 0,
-        reverse=True,
-    )
-    top_papers = sorted_papers[:top_k_evidence]
-    print(f"[phase_a] Step 2/4: 选 top-{len(top_papers)} 篇做深抽取", file=sys.stderr)
+    # ---- Step 2: 选 top-K paper 做深抽取 ----
+    # 排序键：(entity_hits, citation_count) 降序
+    # entity_hits = 这篇论文贡献了多少个不同的 entity（method/dataset/metric）
+    # 设计动机：纯按 citation 排会让 GPT-3 / Llama 2 / PyTorch 等基础工作压过
+    #   方向相关的小众论文（LayerSkip / DEL / QSpec），因为基础论文引用量比方向
+    #   论文高一个数量级。entity_hits 反映"实体抽取认为多相关"，是更准的方向
+    #   匹配信号。citation_count 作为同分时的 tiebreaker 保留。
+    top_papers = _select_top_papers_by_relevance(graph, top_k_evidence)
+    print(f"[phase_a] Step 2/4: 选 top-{len(top_papers)} 篇做深抽取 "
+          f"（按 entity hits + citation 排序）", file=sys.stderr)
 
     # ---- Step 3: 解析 arxiv_id（用于全文拉取）----
     arxiv_id_by_paperid = _resolve_arxiv_ids(top_papers)
@@ -123,6 +125,38 @@ def build_research_material_pack(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+def _select_top_papers_by_relevance(
+    graph: "ConceptGraph",
+    top_k: int,
+) -> list[PaperInfo]:
+    """
+    按 (entity_hits, citation_count) 降序选 top-K paper。
+
+    entity_hits[paper_id] = 这篇 paper 出现在多少个不同 entity 的 paper_ids 列表里。
+    数值越大说明 entity 抽取认为它跟方向越相关（贡献了越多方法/数据集/指标实体）。
+
+    与单纯按 citation 排的差异：
+    - 基础工作论文（GPT-3/Llama 2/PyTorch）entity 抽取通常只 hit 1-2 个泛词
+      （"transformer" / "language model"），entity_hits 低
+    - 方向相关论文（LayerSkip / DEL / QSpec）会 hit 多个具体方法/指标
+      （"speculative decoding" / "draft model" / "acceptance rate" / "early exit"），
+      entity_hits 显著高
+    - 同 entity_hits 的用 citation_count tiebreak（保留原有信号但作为次要）
+    """
+    from collections import Counter
+    from darwinian.state import ConceptGraph
+    entity_hits: Counter[str] = Counter()
+    for e in graph.entities:
+        for pid in e.paper_ids:
+            entity_hits[pid] += 1
+
+    return sorted(
+        graph.papers,
+        key=lambda p: (entity_hits.get(p.paper_id, 0), p.citation_count or 0),
+        reverse=True,
+    )[:top_k]
+
 
 def _resolve_arxiv_ids(papers: list[PaperInfo]) -> dict[str, str]:
     """

@@ -362,3 +362,76 @@ class TestBuildMaterialPack:
         assert pack.paper_evidence == []
         assert pack.timeline_signals == {}
         assert pack.concept_graph is empty_graph
+
+
+# ===========================================================================
+# Fix D1: 按 entity_hits + citation_count 选 top-K
+# ===========================================================================
+
+from darwinian.agents.phase_a_orchestrator import _select_top_papers_by_relevance
+
+
+class TestSelectTopPapersByRelevance:
+    """验证 entity-hits-based 排序能让方向相关论文压过基础工作论文"""
+
+    def test_entity_hits_dominates_citation(self):
+        """高 citation 但 0 entity hits 应被低 citation 但高 hits 压过"""
+        # 模拟实际场景：foundation paper 引用数高但只 hit 1 个泛词；方向论文反过来
+        foundation = _mk_paper("FOUNDATION", citations=10000)   # GPT-3 级
+        direction = _mk_paper("DIRECTION", citations=50)         # LayerSkip 级
+        graph = ConceptGraph(
+            papers=[foundation, direction],
+            entities=[
+                # foundation 只 hit 1 个泛词
+                Entity(canonical_name="transformer", type="method", paper_ids=["FOUNDATION"]),
+                # direction 论文 hit 4 个具体方法/指标
+                Entity(canonical_name="speculative decoding", type="method", paper_ids=["DIRECTION"]),
+                Entity(canonical_name="draft model", type="method", paper_ids=["DIRECTION"]),
+                Entity(canonical_name="acceptance rate", type="metric", paper_ids=["DIRECTION"]),
+                Entity(canonical_name="early exit", type="method", paper_ids=["DIRECTION"]),
+            ],
+        )
+        top = _select_top_papers_by_relevance(graph, top_k=2)
+        # direction 论文应排第 1（4 hits vs 1 hit）尽管 citation 少 200×
+        assert top[0].paper_id == "DIRECTION"
+        assert top[1].paper_id == "FOUNDATION"
+
+    def test_citation_breaks_ties_when_hits_equal(self):
+        """同 entity_hits 时按 citation_count 降序"""
+        a = _mk_paper("A", citations=100)
+        b = _mk_paper("B", citations=500)
+        graph = ConceptGraph(
+            papers=[a, b],
+            entities=[
+                Entity(canonical_name="m1", type="method", paper_ids=["A", "B"]),
+            ],
+        )
+        # 都 hit 1 次 → B 引用多排前
+        top = _select_top_papers_by_relevance(graph, top_k=2)
+        assert [p.paper_id for p in top] == ["B", "A"]
+
+    def test_paper_with_zero_hits_at_bottom(self):
+        """从未在 entity 表里出现的 paper 排最后"""
+        a = _mk_paper("WITH_HITS", citations=10)
+        b = _mk_paper("NO_HITS", citations=99999)
+        graph = ConceptGraph(
+            papers=[a, b],
+            entities=[
+                Entity(canonical_name="m1", type="method", paper_ids=["WITH_HITS"]),
+            ],
+        )
+        top = _select_top_papers_by_relevance(graph, top_k=2)
+        assert top[0].paper_id == "WITH_HITS"
+
+    def test_empty_entities_falls_back_to_citation(self):
+        """没有 entity 表时，行为退化到纯 citation 排序（向后兼容）"""
+        papers = [_mk_paper(f"P{i}", citations=100 - i) for i in range(5)]
+        graph = ConceptGraph(papers=papers, entities=[])
+        top = _select_top_papers_by_relevance(graph, top_k=3)
+        assert [p.paper_id for p in top] == ["P0", "P1", "P2"]
+
+    def test_top_k_limits_returned_count(self):
+        papers = [_mk_paper(f"P{i}") for i in range(10)]
+        graph = ConceptGraph(papers=papers, entities=[])
+        assert len(_select_top_papers_by_relevance(graph, top_k=3)) == 3
+        assert len(_select_top_papers_by_relevance(graph, top_k=20)) == 10
