@@ -32,7 +32,7 @@ from darwinian.agents.hypothesis_generator import (
     hypothesis_generator_node,
     DuplicateHypothesisError,
 )
-from darwinian.agents.proposal_elaborator import proposal_elaborator_node
+from darwinian.agents.proposal_elaborator import proposal_elaborator_node_v3
 from darwinian.agents.theoretical_critic import theoretical_critic_node
 from darwinian.utils.similarity import get_text_embedding
 
@@ -205,16 +205,14 @@ def build_hypothesis_graph(
     graph.add_edge("bottleneck_miner", "hypothesis_generator")
     graph.add_edge("write_math_error", "bottleneck_miner")
 
-    # 可选：Agent 2.5 proposal_elaborator
+    # 可选：Agent 2.5 proposal_elaborator (v3 path, 从 state.material_pack 读素材)
+    # 注：state.material_pack 必须由上游 phase_a_orchestrator 在节点之前填充。
+    # gpu_hours_budget / target_venues 当前由 v3 直接从 ResearchConstraints 取，
+    # 这里两个参数保留 signature 但不传入 v3 节点（v3 不接受这些 kwargs）
     if elaborate_proposals:
         graph.add_node(
             "proposal_elaborator",
-            partial(
-                proposal_elaborator_node,
-                llm=llm,
-                gpu_hours_budget=gpu_hours_budget,
-                target_venues=target_venues,
-            ),
+            partial(proposal_elaborator_node_v3, llm=llm),
         )
         graph.add_edge("hypothesis_generator", "proposal_elaborator")
         graph.add_edge("proposal_elaborator", "theoretical_critic")

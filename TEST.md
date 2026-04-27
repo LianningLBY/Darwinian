@@ -34,7 +34,7 @@ pytest tests/test_graphs/test_routing.py -v
 | `tests/test_tools/test_knowledge_graph.py` | expand_one_hop、filter_and_rank、normalize、word-boundary (bert⊄bertopic)、批抽取、canonicalize、相关性裁剪、结构洞、充分性、build_concept_graph 编排 |
 | `tests/test_agents/test_bottleneck_miner.py` | ConceptGraph 管道接入、banned_keywords 在 entity 层过滤、formatters、降级 prompt |
 | `tests/test_agents/test_hypothesis_generator.py` | 硬约束 5 种 error code、候选建议 (word-boundary+兜底)、结构化反馈、step 7.5 组合查重、v2/降级双路径 |
-| `tests/test_agents/test_proposal_elaborator.py` | v2 ConceptGraph 路径（_build_proposal / _validate 6 种 error code / 重试 / node wrapper）+ v3 ResearchMaterialPack 路径（按 category 分组 prompt / forbidden_techniques 校验 / structured outcomes / resource estimate 兜底） |
+| `tests/test_agents/test_proposal_elaborator.py` | v3 ResearchMaterialPack 路径（按 category 分组 prompt / 8 项校验 / forbidden_techniques / structured outcomes / resource estimate 兜底 / Fix A 防 title 幻觉 / Fix B 写作 phase 不算 GPU / 节点从 state.material_pack 读素材） |
 | `tests/test_agents/test_phase_a_orchestrator.py` | helper（_looks_like_arxiv_id / _format_evidence_id / _bucket_by_year）/ _resolve_arxiv_ids 走 S2（含异常吞掉）/ _make_full_text_provider 按 evidence_paper_id 反查 / build_research_material_pack 端到端串接 / Scheme X 完整路径（_llm_list_seed_papers / _verify_and_recover_seed 含 title 回捞 / _title_similarity / _expand_seeds_one_hop / _rerank_by_direction_relevance / build_seed_pool 端到端） |
 | `tests/test_graphs/test_routing.py` | critic_router / execution_router / final_router 路由逻辑 |
 

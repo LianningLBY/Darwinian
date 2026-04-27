@@ -632,12 +632,20 @@ class ResearchState(BaseModel):
         description="Phase 1 v2 核心产物，供 hypothesis_generator 作为硬约束源",
     )
 
+    # Phase 1 v3：Phase A 调研产出，供 elaborator 当输入素材
+    # 由 phase_a_orchestrator.build_research_material_pack 填充
+    material_pack: ResearchMaterialPack | None = Field(
+        default=None,
+        description="Phase A 完整素材包（PaperEvidence + StructuralHoleHook + "
+                    "constraints + timeline）。proposal_elaborator_node_v3 从此读取。",
+    )
+
     # 当前假设
     current_hypothesis: Hypothesis | None = Field(default=None)
 
     # Phase 1 v3：每个 abstraction_tree branch 对应展开的 ResearchProposal
     # N:N 对齐——research_proposals[i] 对应 current_hypothesis.abstraction_tree[i]
-    # 由 proposal_elaborator_node 填充
+    # 由 proposal_elaborator_node_v3 填充
     research_proposals: list[ResearchProposal] = Field(
         default_factory=list,
         description="Phase 1 v3 产出：每个骨架展开的完整 proposal",
