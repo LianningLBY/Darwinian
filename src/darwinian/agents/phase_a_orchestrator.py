@@ -33,6 +33,7 @@ from darwinian.state import (
     ResearchMaterialPack,
 )
 from darwinian.agents.hook_writer import write_structural_hole_hooks
+from darwinian.agents.phenomenon_miner import batch_mine_phenomena
 from darwinian.tools.arxiv_latex_fetcher import fetch_arxiv_latex, render_for_llm
 from darwinian.tools.paper_evidence_extractor import batch_extract_evidence
 from darwinian.tools.semantic_scholar import (
@@ -335,6 +336,17 @@ def build_research_material_pack(
     )
     print(f"[phase_a] 深抽取完成: {len(paper_evidence)} 篇成功", file=sys.stderr)
 
+    # ---- Step 4.5: phenomenon_miner 从全文挖"未解释/意外"现象 ----
+    # 比 entity 组合更深的 idea seed（13 个 SOTA 系统都没做的差异化能力）
+    print(f"[phase_a] Step 4.5/5: phenomenon_miner 挖论文现象", file=sys.stderr)
+    phenomena = batch_mine_phenomena(
+        papers_for_extraction,
+        llm=extractor_llm,
+        full_text_provider=full_text_provider,
+        max_per_paper=3,
+    )
+    print(f"[phase_a] phenomena: 抽到 {len(phenomena)} 条现象", file=sys.stderr)
+
     # ---- Step 5: timeline_signals ----
     timeline = _bucket_by_year(top_papers, arxiv_id_by_paperid)
 
@@ -344,6 +356,7 @@ def build_research_material_pack(
         paper_evidence=paper_evidence,
         concept_graph=graph,
         structural_hole_hooks=structural_hole_hooks,
+        phenomena=phenomena,
         timeline_signals=timeline,
         prior_failures=[],
     )

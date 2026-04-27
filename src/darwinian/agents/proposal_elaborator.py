@@ -36,6 +36,7 @@ from darwinian.state import (
     ExpectedOutcomes,
     MethodologyPhase,
     PaperEvidence,
+    Phenomenon,
     ResearchConstraints,
     ResearchMaterialPack,
     ResearchProposal,
@@ -182,6 +183,13 @@ def _build_user_message_v3(
     if pack.structural_hole_hooks:
         parts.append("\n\n【结构洞 hooks（建议在 motivation/why_now 引用）】\n"
                      + _render_hooks(pack.structural_hole_hooks))
+    if pack.phenomena:
+        parts.append(
+            "\n\n【论文现象（**最强的 idea seed —— 优先围绕这些写 motivation**）】\n"
+            "这些是从论文 full text 抽到的 unexplained_trend / surprising_result。"
+            "每条都是真实存在的研究空白，质量优于纯概念组合：\n"
+            + _render_phenomena(pack.phenomena)
+        )
     if pack.timeline_signals:
         parts.append("\n\n【时间线信号（给 Why Now 提供时间感）】\n"
                      + _render_timeline(pack.timeline_signals))
@@ -255,6 +263,19 @@ def _render_timeline(signals: dict[str, list[str]]) -> str:
     for bucket, ids in signals.items():
         lines.append(f"  - {bucket}: {', '.join(ids[:5])}"
                      + (f" (+{len(ids)-5} more)" if len(ids) > 5 else ""))
+    return "\n".join(lines)
+
+
+def _render_phenomena(phenomena: list[Phenomenon]) -> str:
+    lines = []
+    for ph in phenomena:
+        question = f"\n    → 引出问题: {ph.suggested_question}" if ph.suggested_question else ""
+        lines.append(
+            f"  - [{ph.type}] (来自 {', '.join(ph.paper_ids)})\n"
+            f"    现象: {ph.description}\n"
+            f"    原文引: \"{ph.supporting_quote[:200]}\""
+            f"{question}"
+        )
     return "\n".join(lines)
 
 

@@ -134,6 +134,39 @@ class StructuralHoleHook(BaseModel):
     )
 
 
+class Phenomenon(BaseModel):
+    """
+    从论文 full text 抽取的"未解释/意外/矛盾"现象，作 idea 的真实 grounding seed。
+
+    设计动机：13 个 SOTA auto-research 系统都是从概念组合生成 idea，导致 idea 普遍
+    "新颖但不可行" (Si et al ICLR 2025)。Phenomenon 是更强的 idea 来源——研究往往
+    从"这个现象为什么会这样"开始，不是从"这两个概念没人一起用"开始。
+
+    生成时机：phase_a_orchestrator 对 top-K paper 的 LaTeX 全文调 phenomenon_miner。
+    供 elaborator 在 motivation / proposed_method 段优先围绕 phenomenon 写。
+    """
+    type: Literal["unexplained_trend", "surprising_result", "cross_paper_contradiction"] = Field(
+        description="现象类型："
+                    "unexplained_trend=作者承认观察到 X 但留给 future work；"
+                    "surprising_result='surprisingly A outperforms B' 类反直觉发现；"
+                    "cross_paper_contradiction=多篇论文对同一方法报不同结果",
+    )
+    description: str = Field(
+        description="一句话描述现象（≤ 60 词），含 model/dataset/具体数字",
+    )
+    supporting_quote: str = Field(
+        description="原文引用（≤ 200 字），能唯一定位现象出处",
+    )
+    paper_ids: list[str] = Field(
+        default_factory=list,
+        description="涉及的论文（contradiction 类有多篇；其他类通常 1 篇）",
+    )
+    suggested_question: str = Field(
+        default="",
+        description="这个现象引出的 'why?' 研究问题，elaborator 可直接做 motivation 用",
+    )
+
+
 class ConceptGraph(BaseModel):
     """
     Phase 1 v2 核心产物：从 60+ 篇论文抽取出的术语 + 缺陷 + 结构洞。
@@ -412,6 +445,11 @@ class ResearchMaterialPack(BaseModel):
     structural_hole_hooks: list[StructuralHoleHook] = Field(
         default_factory=list,
         description="带 hook_text 的结构洞 top-K，elaborator 在 motivation 里直接引用",
+    )
+    phenomena: list[Phenomenon] = Field(
+        default_factory=list,
+        description="从 paper full text 抽取的'未解释/意外/矛盾'现象，是更深的 idea seed。"
+                    "elaborator 应优先围绕 phenomenon 写 motivation 而不是围绕 entity 组合。",
     )
     timeline_signals: dict[str, list[str]] = Field(
         default_factory=dict,
