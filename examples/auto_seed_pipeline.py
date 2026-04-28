@@ -91,32 +91,64 @@ def main() -> None:
         math_formulation=r"$f(\cdot)$",
     )
 
-    # ---- Phase B: elaborator ----
-    from darwinian.agents.proposal_elaborator import elaborate_proposal_from_pack
-    print("[auto_seed] Phase B 启动 —— elaborator", file=sys.stderr)
-    proposal = elaborate_proposal_from_pack(
-        skeleton=skeleton, material_pack=pack, llm=elaborator_llm,
+    # ---- Phase B: multi_elaborate (Tournament 路径，N=5 候选) ----
+    from darwinian.agents.proposal_tournament import multi_elaborate, run_tournament
+    n_candidates = int(os.environ.get("DARWINIAN_N_CANDIDATES", "5"))
+    print(f"[auto_seed] Phase B 启动 —— multi_elaborate (N={n_candidates})",
+          file=sys.stderr)
+    proposals = multi_elaborate(
+        skeleton=skeleton, pack=pack, llm=elaborator_llm,
+        n_candidates=n_candidates,
     )
-    if proposal is None:
-        print("# 错误：elaborator 3 次重试全失败", file=sys.stderr)
+    if not proposals:
+        print("# 错误：multi_elaborate 未产出任何 proposal", file=sys.stderr)
         sys.exit(3)
-    print("[auto_seed] Phase B 完成", file=sys.stderr)
+    print(f"[auto_seed] Phase B 完成: 生 {len(proposals)} 个 candidate", file=sys.stderr)
 
-    # ---- Phase B.5: SciMON novelty boost ----
+    # ---- Phase B.5: SciMON novelty boost (对每个 candidate) ----
     from darwinian.agents.novelty_booster import boost_novelty
-    print("[auto_seed] Phase B.5 启动 —— SciMON novelty boost (max 3 rounds)",
+    print(f"[auto_seed] Phase B.5 启动 —— SciMON novelty boost x {len(proposals)}",
           file=sys.stderr)
-    proposal, boost_result = boost_novelty(
-        proposal=proposal, direction=direction, llm=extractor_llm, max_rounds=3,
-    )
-    print(f"[auto_seed] Phase B.5 完成: {boost_result.rounds_taken} 轮, "
-          f"converged={boost_result.converged}, "
-          f"final overlap_level={(boost_result.final_assessment.overlap_level if boost_result.final_assessment else 'n/a')}",
+    boosted_proposals = []
+    disqualified_titles = []
+    for i, p in enumerate(proposals):
+        print(f"[auto_seed] novelty boost candidate {i+1}/{len(proposals)}",
+              file=sys.stderr)
+        boosted, boost_result = boost_novelty(
+            proposal=p, direction=direction, llm=extractor_llm, max_rounds=3,
+        )
+        boosted_proposals.append(boosted)
+        if not boost_result.converged:
+            disqualified_titles.append(boosted.title or f"proposal_{i}")
+    print(f"[auto_seed] Phase B.5 完成: {len(boosted_proposals)} 个，"
+          f"disqualified {len(disqualified_titles)} 个 (撞车未收敛)",
           file=sys.stderr)
 
-    # ---- 渲染 ----
-    from darwinian.tools.seed_renderer import render_proposal
-    md = render_proposal(proposal, material_pack=pack)
+    # ---- Phase C: pairwise tournament ----
+    print(f"[auto_seed] Phase C 启动 —— pairwise tournament", file=sys.stderr)
+    tournament = run_tournament(boosted_proposals, llm=extractor_llm, top_k=2)
+    tournament.disqualified_ids = disqualified_titles
+    print(f"[auto_seed] Phase C 完成: top_2 = {tournament.top_k_ids}", file=sys.stderr)
+
+    # ---- 渲染：top-1 主输出 + 全部 candidates 概览 ----
+    from darwinian.tools.seed_renderer import render_proposal, render_tournament_overview
+    title_to_proposal = {(p.title or f"proposal_{i}"): p
+                         for i, p in enumerate(boosted_proposals)}
+    # 选 top-1 但优先非 disqualified
+    top_proposal = None
+    for tid in tournament.top_k_ids:
+        if tid not in tournament.disqualified_ids and tid in title_to_proposal:
+            top_proposal = title_to_proposal[tid]
+            break
+    if top_proposal is None:
+        # 全部 disqualified → 退而求其次取 elo 最高
+        top_proposal = title_to_proposal.get(
+            tournament.top_k_ids[0] if tournament.top_k_ids else "",
+            boosted_proposals[0],
+        )
+
+    md = render_proposal(top_proposal, material_pack=pack)
+    md += "\n\n" + render_tournament_overview(tournament, boosted_proposals)
     print(md)
 
 

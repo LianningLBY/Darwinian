@@ -392,6 +392,48 @@ class NoveltyBoostResult(BaseModel):
     )
 
 
+class TournamentMatch(BaseModel):
+    """单场 pairwise 比较的 LLM 判定结果"""
+    proposal_a_id: str = Field(description="proposal A 的 id（通常用 title）")
+    proposal_b_id: str = Field(description="proposal B 的 id")
+    winner: Literal["a", "b", "tie"] = Field(
+        description="LLM 综合判定哪个更强（novelty + feasibility + impact）",
+    )
+    judge_reasoning: str = Field(
+        default="",
+        description="LLM 给出的简短理由（含三维度分别比较）",
+    )
+    rubric_scores: dict[str, str] = Field(
+        default_factory=dict,
+        description="按维度的子判定，如 {'novelty': 'a', 'feasibility': 'b', 'impact': 'tie'}",
+    )
+
+
+class TournamentResult(BaseModel):
+    """
+    Multi-idea Tournament Selection 的最终汇总。
+
+    流程：N 个 proposal 做 C(N,2) 次 pairwise → Elo 排名 → 取 top-K。
+    撞车的（novelty boost converged=False）会标在 disqualified 字段，但仍参与排名
+    （由调用方决定是否过滤）。
+    """
+    matches: list[TournamentMatch] = Field(default_factory=list)
+    elo_rankings: list[dict] = Field(
+        default_factory=list,
+        description="[{'proposal_id': '...', 'elo': 1265.5, 'wins': 3, 'losses': 1, "
+                    "'ties': 0}, ...] 按 elo 降序",
+    )
+    top_k_ids: list[str] = Field(
+        default_factory=list,
+        description="按 Elo 取的 top-K proposal_id（K 由 run_tournament 参数定）",
+    )
+    disqualified_ids: list[str] = Field(
+        default_factory=list,
+        description="SciMON novelty boost 未收敛 (overlap=substantial+) 的 proposal_id，"
+                    "建议从 top_k_ids 排除（但仍记录在 matches 里供 audit）",
+    )
+
+
 class ResearchProposal(BaseModel):
     """
     Phase 1 v3 产出：从 AbstractionBranch 骨架展开的完整研究 proposal。

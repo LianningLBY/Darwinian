@@ -39,6 +39,7 @@ pytest tests/test_graphs/test_routing.py -v
 | `tests/test_agents/test_hook_writer.py` | EntityPair → StructuralHoleHook：happy path / max_hooks 截断 / relation_type 校验+反馈重试 / 大小写不敏感 / LLM 失败跳过该 pair / 部分失败不阻塞 / 代表论文按 citation 排 / prompt 含方向+论文标题 |
 | `tests/test_agents/test_phenomenon_miner.py` | 单论文挖现象（unexplained_trend / surprising_result）/ type 校验（cross_paper_contradiction 单论文路径滤掉）/ 缺 description 或 quote 丢弃 / max_per_paper 截断 / 长 quote 截到 500 / non-dict 条目跳过 / LLM 失败/JSON 不可解析返空 / batch 部分失败不阻塞 / full_text_provider 异常吞掉 / prompt 截 20K |
 | `tests/test_agents/test_novelty_booster.py` | SciMON loop：query 抽取（含 fallback 到 title）/ S2 召回去重 + 限 8 / overlap 评估 4 种 level / novelty_score clamp [0,1] / 大小写不敏感 / refine 写回 / 端到端（partial 即停 / substantial 触发 refine 后收敛 / max_rounds 截断 / 0 召回视为 none / assess 失败保守 partial / convergence_levels 自定义） |
+| `tests/test_agents/test_proposal_tournament.py` | _select_anchors 三档降级 (phenomenon→hook→reuse) / pairwise_compare winner 校验 + rubric 解析 + 大小写归一 / Elo 数学 (expected_score / update_elo / sort by elo) / run_tournament C(N,2) 配对 + top_k + 单/空 proposal 兜底 + 同名 proposal 加后缀 + 单场失败不阻塞 / multi_elaborate N 次调 elaborator 用不同 anchor |
 | `tests/test_graphs/test_routing.py` | critic_router / execution_router / final_router 路由逻辑 |
 
 ### 预挂测试（基线，非 Phase 1 v2 引入）

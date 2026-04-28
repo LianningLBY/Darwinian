@@ -224,3 +224,63 @@ def _render_novelty(na: NoveltyAssessment) -> str:
     if na.differentiation_gap:
         lines.append(f"- **differentiation gap**: {na.differentiation_gap}")
     return "\n".join(lines)
+
+
+def render_tournament_overview(
+    tournament,
+    proposals: list,
+) -> str:
+    """
+    把 TournamentResult 渲染成"## 锦标赛全候选概览"段。
+
+    Args:
+        tournament: TournamentResult
+        proposals: 全部 candidate proposals（list[ResearchProposal]）
+    """
+    if not tournament or not tournament.elo_rankings:
+        return ""
+
+    title_to_proposal = {(p.title or f"proposal_{i}"): p
+                         for i, p in enumerate(proposals)}
+
+    lines = ["## 锦标赛全候选概览\n"]
+    lines.append(
+        f"本次 Phase C 锦标赛跑了 {len(tournament.matches)} 场 pairwise "
+        f"对决，按 Elo 排序如下：\n"
+    )
+
+    for i, ranking in enumerate(tournament.elo_rankings):
+        pid = ranking["proposal_id"]
+        p = title_to_proposal.get(pid)
+        is_disq = pid in tournament.disqualified_ids
+        is_top = pid in tournament.top_k_ids[:2]
+
+        badges = []
+        if is_top and not is_disq:
+            badges.append("🏆 top-2")
+        if is_disq:
+            badges.append("⚠️ 撞车")
+        badge_str = " ".join(badges)
+
+        title_short = (p.title if p else pid)[:80]
+        lines.append(
+            f"\n### {i+1}. {badge_str} (Elo={ranking['elo']:.1f}, "
+            f"W{ranking['wins']}/L{ranking['losses']}/T{ranking['ties']})"
+        )
+        lines.append(f"\n**{title_short}**")
+        if p and p.elevator_pitch:
+            lines.append(f"\n{p.elevator_pitch[:300]}")
+        if p and p.novelty_assessment:
+            na = p.novelty_assessment
+            lines.append(
+                f"\n*novelty: `{na.overlap_level}` "
+                f"({na.novelty_score:.2f}); "
+                f"closest: {na.closest_work_title[:60] or 'n/a'}*"
+            )
+
+    if tournament.disqualified_ids:
+        lines.append(
+            f"\n\n**说明**: ⚠️ 撞车 = SciMON novelty boost 未收敛 "
+            f"(overlap_level=substantial+)，建议丢弃或重新设计。"
+        )
+    return "\n".join(lines)
