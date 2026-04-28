@@ -500,3 +500,160 @@ class TestFixBWritingPhaseHasGpuHours:
         assert "Paper Writing" in feedback and "48" in feedback
         assert "Manuscript Polish" in feedback and "12" in feedback
         assert "expected_compute_hours 设 0" in feedback or "删掉" in feedback
+
+
+# ===========================================================================
+# Pri-2: Methodology validators (MILESTONE_GATE_MISSING / BUDGET_PHASES_MISMATCH +
+# 扩展 WRITING_PHASE_HAS_GPU_HOURS keywords)
+# ===========================================================================
+
+from darwinian.agents.proposal_elaborator import (
+    _is_hypothesis_validation_phase,
+    _has_decision_gate,
+)
+
+
+class TestHypothesisPhaseDetection:
+    def test_profiling_phase_detected(self):
+        from darwinian.state import MethodologyPhase
+        ph = MethodologyPhase(phase_number=1, name="Sensitivity Profiling",
+                               description="Profile per-layer entropy")
+        assert _is_hypothesis_validation_phase(ph)
+
+    def test_pilot_in_description(self):
+        from darwinian.state import MethodologyPhase
+        ph = MethodologyPhase(phase_number=1, name="Phase 1",
+                               description="Run pilot study to verify correlation")
+        assert _is_hypothesis_validation_phase(ph)
+
+    def test_normal_phase_not_detected(self):
+        from darwinian.state import MethodologyPhase
+        ph = MethodologyPhase(phase_number=1, name="Implementation",
+                               description="Build the system")
+        assert not _is_hypothesis_validation_phase(ph)
+
+
+class TestDecisionGateDetection:
+    def test_explicit_threshold(self):
+        from darwinian.state import MethodologyPhase
+        ph = MethodologyPhase(phase_number=1, name="Profiling",
+                               description="if r > 0.4 proceed; else pivot")
+        assert _has_decision_gate(ph)
+
+    def test_outputs_contain_gate(self):
+        from darwinian.state import MethodologyPhase
+        ph = MethodologyPhase(phase_number=1, name="Profiling",
+                               description="x", outputs=["go/no-go decision"])
+        assert _has_decision_gate(ph)
+
+    def test_no_gate_returns_false(self):
+        from darwinian.state import MethodologyPhase
+        ph = MethodologyPhase(phase_number=1, name="Profiling",
+                               description="just measure things")
+        assert not _has_decision_gate(ph)
+
+
+class TestMilestoneGateMissing:
+    def test_v9_egat_case_flagged(self):
+        """重现 v9: phase 1 是 sensitivity profiling，无 decision gate → 应触发"""
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["methodology_phases"] = [
+            {"phase_number": 1, "name": "Entropy Profiling",
+             "description": "Profile per-layer entropy correlation",
+             "expected_compute_hours": 96},
+            {"phase_number": 2, "name": "Halter MLP Training",
+             "description": "Train halter on entropy", "expected_compute_hours": 120},
+            {"phase_number": 3, "name": "End-to-end Eval",
+             "description": "Test", "expected_compute_hours": 60},
+        ]
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "MILESTONE_GATE_MISSING" in codes
+
+    def test_phase_with_gate_passes(self):
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["methodology_phases"] = [
+            {"phase_number": 1, "name": "Entropy Profiling",
+             "description": "Profile correlation. Decision criteria: if Spearman r > 0.4 proceed to Phase 2; else pivot to failure-mode analysis",
+             "expected_compute_hours": 96},
+            {"phase_number": 2, "name": "Build", "description": "x",
+             "expected_compute_hours": 120},
+            {"phase_number": 3, "name": "Eval", "description": "y",
+             "expected_compute_hours": 60},
+        ]
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "MILESTONE_GATE_MISSING" not in codes
+
+    def test_non_hypothesis_phase_not_flagged(self):
+        """如果 phase 1 不是 hypothesis validation 就不要求 gate"""
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["methodology_phases"] = [
+            {"phase_number": 1, "name": "Implementation",
+             "description": "Build system", "expected_compute_hours": 96},
+            {"phase_number": 2, "name": "Eval", "description": "x",
+             "expected_compute_hours": 60},
+            {"phase_number": 3, "name": "Ablation", "description": "y",
+             "expected_compute_hours": 50},
+        ]
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "MILESTONE_GATE_MISSING" not in codes
+
+
+class TestBudgetPhasesMismatch:
+    def test_v9_644_vs_672_case(self):
+        """v9 实测：phase sum=644 但 total=672 → 应触发"""
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        # 强制构造 mismatch: 让 _build_proposal_v3 算出 sum, 然后人工改 total
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        # 改 total 跟 sum 错开
+        proposal.total_estimated_hours = proposal.total_estimated_hours + 28
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "BUDGET_PHASES_MISMATCH" in codes
+
+    def test_consistent_passes(self):
+        """sum == total 时不触发"""
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        # 默认 _build_proposal_v3 让 total = sum，应一致
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "BUDGET_PHASES_MISMATCH" not in codes
+
+    def test_within_1h_tolerance_passes(self):
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        proposal.total_estimated_hours = proposal.total_estimated_hours + 0.5
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "BUDGET_PHASES_MISMATCH" not in codes
+
+
+class TestExpandedWritingKeywords:
+    def test_final_analysis_caught(self):
+        """新关键词 'final analysis' 也算写作类 phase"""
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["methodology_phases"].append({
+            "phase_number": 4, "name": "Final Analysis and Threshold Validation",
+            "description": "Wrap up", "expected_compute_hours": 48,
+        })
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "WRITING_PHASE_HAS_GPU_HOURS" in codes
+
+    def test_polish_caught(self):
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["methodology_phases"].append({
+            "phase_number": 4, "name": "Camera-ready Polish",
+            "description": "x", "expected_compute_hours": 12,
+        })
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "WRITING_PHASE_HAS_GPU_HOURS" in codes

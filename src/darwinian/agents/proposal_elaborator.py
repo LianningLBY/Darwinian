@@ -396,7 +396,36 @@ def _now_iso() -> str:
 _WRITING_PHASE_KEYWORDS = (
     "paper writing", "writing", "submission", "manuscript",
     "supplementary", "camera-ready", "camera ready",
+    # Pri-2: 扩展抓 wrap-up 类伪 phase
+    "final analysis", "results writing", "wrap-up", "wrap up",
+    "preparation for submission", "polish",
 )
+
+# Pri-2: hypothesis-validation phase 的关键词（出现在 phase 1 名/描述里）
+# 这些 phase 应该在末尾有 decision gate（"if r > τ proceed; else pivot..."）
+_HYPOTHESIS_PHASE_KEYWORDS = (
+    "profiling", "probing", "correlation", "verify hypothesis",
+    "validate assumption", "measure", "exploratory", "pilot",
+    "preliminary", "feasibility study",
+)
+
+# Pri-2: decision gate 关键词（在 phase outputs / description 中出现表示已设关卡）
+_DECISION_GATE_KEYWORDS = (
+    "decision criteria", "go/no-go", "go or no go", "milestone",
+    "if r >", "if rho >", "if accuracy >", "if score >",
+    "threshold for proceeding", "pivot if", "stop if",
+    "abandon if", "abort if", "decision gate",
+)
+
+
+def _is_hypothesis_validation_phase(ph) -> bool:
+    text = (ph.name + " " + ph.description).lower()
+    return any(kw in text for kw in _HYPOTHESIS_PHASE_KEYWORDS)
+
+
+def _has_decision_gate(ph) -> bool:
+    text = (ph.name + " " + ph.description + " " + " ".join(ph.outputs)).lower()
+    return any(kw in text for kw in _DECISION_GATE_KEYWORDS)
 
 
 def _validate_v3(
@@ -461,6 +490,28 @@ def _validate_v3(
     if writing_phase_violations:
         errors.append(("WRITING_PHASE_HAS_GPU_HOURS", writing_phase_violations))
 
+    # Pri-2 #10. MILESTONE_GATE_MISSING: hypothesis-验证 phase 后续紧接系统建设
+    # phase 但 hypothesis phase 末尾没 decision gate
+    # 触发条件：第 1 个 phase 看起来是 hypothesis validation + 后续 phase ≥ 2 个 +
+    #           hypothesis phase 没 decision gate
+    if len(proposal.methodology_phases) >= 3:
+        first = proposal.methodology_phases[0]
+        if _is_hypothesis_validation_phase(first) and not _has_decision_gate(first):
+            # 后续 phase 必须依赖第 1 个 hypothesis 成立才有意义
+            errors.append((
+                "MILESTONE_GATE_MISSING",
+                first.name,
+            ))
+
+    # Pri-2 #11. BUDGET_PHASES_MISMATCH: phase compute_hours 总和 vs total_estimated_hours
+    # 不一致（v9 实测：sum=644 但写 672）
+    actual_sum = sum(p.expected_compute_hours for p in proposal.methodology_phases)
+    if abs(actual_sum - proposal.total_estimated_hours) > 1.0:   # 1h 容差
+        errors.append((
+            "BUDGET_PHASES_MISMATCH",
+            (actual_sum, proposal.total_estimated_hours),
+        ))
+
     return errors
 
 
@@ -510,6 +561,24 @@ def _build_feedback_v3(errors: list[tuple], pack: ResearchMaterialPack) -> str:
                 f"{offenders}\n"
                 "     要么删掉该 phase（推荐），要么 expected_compute_hours 设 0。"
                 "写论文 / 投稿 / 准备 supplementary 不算在 methodology_phases 里"
+            )
+        elif code == "MILESTONE_GATE_MISSING":
+            lines.append(
+                f"  ❌ 第 1 个 phase '{detail}' 看起来是 hypothesis validation "
+                "（profiling/correlation/measure 等），但 phase 末尾没 decision gate。"
+                "后续 phase 全建在 hypothesis 成立的前提上 → 如果 phase 1 失败整个"
+                "项目废。\n"
+                "     在 phase 1 的 outputs 或 description 里加 decision criteria，如："
+                "'if Spearman ρ > 0.4 → proceed to Phase 2; else pivot to failure-mode "
+                "analysis (write negative result paper)'"
+            )
+        elif code == "BUDGET_PHASES_MISMATCH":
+            actual, claimed = detail
+            lines.append(
+                f"  ❌ phase compute_hours 总和 {actual:.0f}h ≠ total_estimated_hours "
+                f"{claimed:.0f}h（差 {abs(actual-claimed):.0f}h）。"
+                "审稿人会查这个数。要么改 phase hours 让加和等于 total，"
+                "要么改 total 等于实际加和"
             )
 
     lines.append("\n请保持其他正确字段不变，只修正以上问题。")
