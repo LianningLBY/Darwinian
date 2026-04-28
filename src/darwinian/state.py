@@ -392,6 +392,57 @@ class NoveltyBoostResult(BaseModel):
     )
 
 
+class FeasibilityRisk(BaseModel):
+    """
+    单条 feasibility 风险：Feasibility Challenger 对 top proposal 的 attack 输出。
+
+    设计动机：HindSight 2026 / Si et al. 都指出 LLM 单 judge pass 系统性低估 feasibility。
+    Pairwise tournament 的 feasibility 维度只是相对排序，绝对的可行性"洞"还得用专门
+    Adversarial pass 攻击（参考 Co-Scientist / DeepReview 的 adversarial reviewer 模式）。
+    """
+    category: Literal[
+        "budget", "dependency", "data", "timeline", "scope", "evaluation", "other"
+    ] = Field(description=(
+        "风险类别：budget=GPU/时间预算超；dependency=依赖未成熟工具/库；"
+        "data=数据不可得或要 human anno；timeline=阶段时间分配过紧；"
+        "scope=方法过于宽泛/未对齐 venue；evaluation=metric 不存在或难以测；other"
+    ))
+    severity: Literal["low", "medium", "high"] = Field(
+        description="low=warning（可上线但要监控）；medium=要 mitigation 才可执行；"
+                    "high=阻断性（不修就跑不通）",
+    )
+    description: str = Field(
+        description="一句话说明风险（≤80 词）。要含具体出处，如 'phase 2 写 200 GPU-hours "
+                    "但 budget 只剩 168'，避免空泛的 'time may not be enough'",
+    )
+    mitigation: str = Field(
+        default="",
+        description="一句话可操作的修补建议。如 '把 ablation 缩到 3 模型而非 5'。空字符串=无明显 mitigation",
+    )
+
+
+class FeasibilityChallenge(BaseModel):
+    """
+    Feasibility Challenger 对单 proposal 的完整 adversarial 评估结果。
+
+    流程：take top-1 proposal → LLM adversarial prompt → 列出风险 + overall verdict。
+    Non-blocking：只附在 seed.md 里供人工 review，不阻塞 pipeline。
+    """
+    risks: list[FeasibilityRisk] = Field(
+        default_factory=list,
+        description="按 severity 降序的风险列表。空列表 = adversarial 没找到风险（罕见）",
+    )
+    overall_verdict: Literal["go", "go_with_mitigations", "rework"] = Field(
+        default="go",
+        description="go=低风险可执行；go_with_mitigations=有 medium 风险，按 mitigation 调整后执行；"
+                    "rework=≥1 high 风险，建议重新设计方法或 phase",
+    )
+    summary: str = Field(
+        default="",
+        description="一句话总评（30-80 词），给 PI 看的执行建议",
+    )
+
+
 class TournamentMatch(BaseModel):
     """单场 pairwise 比较的 LLM 判定结果"""
     proposal_a_id: str = Field(description="proposal A 的 id（通常用 title）")
@@ -516,6 +567,14 @@ class ResearchProposal(BaseModel):
         default=None,
         description="跟最相似 prior work 对比的评估。None 表示未跑 novelty boost；"
                     "存在时 overlap_level 决定 proposal 可用性",
+    )
+
+    # ---- Feasibility Challenger 攻击结果（R9c）----
+    # 仅 top-1 proposal 跑（成本控制：1 LLM call vs N=5 浪费）
+    feasibility_challenge: FeasibilityChallenge | None = Field(
+        default=None,
+        description="Feasibility Challenger adversarial 评估，None 表示未跑。"
+                    "存在时渲染到 seed.md 的 '⚠️ Feasibility Risks' section。",
     )
 
     # ---- Spot-check: 不在 paper_evidence.quantitative_claims 里的可疑数字 ----

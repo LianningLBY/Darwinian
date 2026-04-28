@@ -147,6 +147,22 @@ def main() -> None:
             boosted_proposals[0],
         )
 
+    # ---- R9c: Feasibility Challenger (仅 top-1) ----
+    from darwinian.agents.feasibility_challenger import challenge_feasibility
+    print(f"[auto_seed] R9c 启动 —— Feasibility Challenger 攻击 top-1", file=sys.stderr)
+    fc = challenge_feasibility(
+        proposal=top_proposal, constraints=constraints, llm=extractor_llm,
+    )
+    if fc is not None:
+        top_proposal.feasibility_challenge = fc
+        print(
+            f"[auto_seed] R9c 完成: verdict={fc.overall_verdict}, "
+            f"risks={len(fc.risks)} (high={sum(1 for r in fc.risks if r.severity == 'high')})",
+            file=sys.stderr,
+        )
+    else:
+        print(f"[auto_seed] R9c 失败（LLM error），跳过", file=sys.stderr)
+
     md = render_proposal(top_proposal, material_pack=pack)
     md += "\n\n" + render_tournament_overview(tournament, boosted_proposals)
     print(md)

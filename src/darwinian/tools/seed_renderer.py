@@ -11,6 +11,7 @@ Seed Renderer：把 ResearchProposal 渲染成 QuantSkip 风格的 seed.md。
 from __future__ import annotations
 
 from darwinian.state import (
+    FeasibilityChallenge,
     NoveltyAssessment,
     ResearchMaterialPack,
     ResearchProposal,
@@ -78,6 +79,10 @@ def render_proposal(
     if proposal.novelty_assessment is not None:
         parts.append("\n\n## 新颖性评估\n")
         parts.append(_render_novelty(proposal.novelty_assessment))
+
+    # ---- Feasibility Challenger 攻击结果 (R9c) ----
+    if proposal.feasibility_challenge is not None:
+        parts.append(_render_feasibility_challenge(proposal.feasibility_challenge))
 
     # ---- Spot-check audit hint (Pri-4) ----
     if proposal.unverified_numbers:
@@ -234,6 +239,34 @@ def _render_novelty(na: NoveltyAssessment) -> str:
     if na.differentiation_gap:
         lines.append(f"- **differentiation gap**: {na.differentiation_gap}")
     return "\n".join(lines)
+
+
+def _render_feasibility_challenge(fc: FeasibilityChallenge) -> str:
+    """
+    渲染 FeasibilityChallenger 输出为 '⚠️ Feasibility Risks' section。
+
+    severity 用 emoji 区分以便扫读：🟢 low / 🟡 medium / 🔴 high
+    verdict 总评放最上面，risks 按 severity 降序列出。
+    """
+    sev_icon = {"high": "🔴", "medium": "🟡", "low": "🟢"}
+    verdict_icon = {"go": "🟢", "go_with_mitigations": "🟡", "rework": "🔴"}
+    parts = ["\n\n## ⚠️ Feasibility Risks (R9c adversarial pass)\n\n"]
+    parts.append(
+        f"**Verdict**: {verdict_icon.get(fc.overall_verdict, '')} `{fc.overall_verdict}`\n\n"
+    )
+    if fc.summary:
+        parts.append(f"**Summary**: {fc.summary}\n\n")
+    if not fc.risks:
+        parts.append("_(no risks identified — 罕见，建议人工再 review 一遍)_\n")
+        return "".join(parts)
+    for r in fc.risks:
+        icon = sev_icon.get(r.severity, "")
+        parts.append(
+            f"- {icon} **[{r.severity.upper()} / {r.category}]** {r.description}\n"
+        )
+        if r.mitigation:
+            parts.append(f"  - *mitigation*: {r.mitigation}\n")
+    return "".join(parts)
 
 
 def render_tournament_overview(

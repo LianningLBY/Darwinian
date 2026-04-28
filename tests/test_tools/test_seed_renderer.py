@@ -245,6 +245,53 @@ class TestNoveltySection:
         assert "ours measures per-layer cliff" in md
 
 
+class TestFeasibilityChallengeSection:
+    """R9c: Feasibility Challenger 渲染"""
+
+    def _fc(self, **overrides):
+        from darwinian.state import FeasibilityChallenge, FeasibilityRisk
+        base = dict(
+            risks=[
+                FeasibilityRisk(
+                    category="budget", severity="high",
+                    description="phase 2 写 200h 但 budget 只剩 168",
+                    mitigation="砍 ablation 数",
+                ),
+                FeasibilityRisk(
+                    category="data", severity="low",
+                    description="dataset license unclear",
+                ),
+            ],
+            overall_verdict="rework",
+            summary="不修不能跑",
+        )
+        base.update(overrides)
+        return FeasibilityChallenge(**base)
+
+    def test_no_challenge_no_section(self):
+        p = _minimal_proposal()
+        md = render_proposal(p)
+        assert "Feasibility Risks" not in md
+
+    def test_renders_verdict_and_risks(self):
+        p = _minimal_proposal(feasibility_challenge=self._fc())
+        md = render_proposal(p)
+        assert "## ⚠️ Feasibility Risks" in md
+        assert "rework" in md
+        assert "phase 2" in md
+        assert "[HIGH / budget]" in md
+        assert "[LOW / data]" in md
+        assert "*mitigation*" in md
+        assert "砍 ablation" in md
+
+    def test_empty_risks_renders_note(self):
+        from darwinian.state import FeasibilityChallenge
+        empty_fc = FeasibilityChallenge(risks=[], overall_verdict="go", summary="clean")
+        p = _minimal_proposal(feasibility_challenge=empty_fc)
+        md = render_proposal(p)
+        assert "no risks identified" in md
+
+
 class TestSpotCheckSection:
     def test_no_unverified_no_section(self):
         p = _minimal_proposal()
