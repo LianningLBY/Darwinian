@@ -84,10 +84,17 @@ class TestExtractQueries:
             qs = _extract_queries(_proposal(), MagicMock())
         assert qs == ["query A", "query B"]
 
-    def test_caps_at_2(self):
+    def test_caps_at_3_by_default(self):
+        """v8 SciMON-Q1 fix: 默认 max_queries=3 (current/classic/methodname 三角度)"""
+        with patch("darwinian.agents.novelty_booster.invoke_with_retry",
+                   return_value=_query_response(["q1", "q2", "q3", "q4", "q5"])):
+            qs = _extract_queries(_proposal(), MagicMock())
+        assert len(qs) == 3
+
+    def test_caps_at_custom_max_queries(self):
         with patch("darwinian.agents.novelty_booster.invoke_with_retry",
                    return_value=_query_response(["q1", "q2", "q3", "q4"])):
-            qs = _extract_queries(_proposal(), MagicMock())
+            qs = _extract_queries(_proposal(), MagicMock(), max_queries=2)
         assert len(qs) == 2
 
     def test_strip_and_filter(self):
@@ -101,6 +108,35 @@ class TestExtractQueries:
                    side_effect=ConnectionError("net")):
             qs = _extract_queries(_proposal(title="MyTitle"), MagicMock())
         assert qs == ["MyTitle"]
+
+    def test_prompt_requires_three_terminology_angles(self):
+        """v8 SciMON-Q1: 验证 prompt 含三角度约束（current/classic/methodname）"""
+        from darwinian.agents.novelty_booster import _QUERY_EXTRACT_PROMPT
+        # 必须含的关键词
+        assert "q_current" in _QUERY_EXTRACT_PROMPT
+        assert "q_classic" in _QUERY_EXTRACT_PROMPT
+        assert "q_methodname" in _QUERY_EXTRACT_PROMPT
+        # 必须含 paraphrase 映射示例（防 LLM 写不出 classic 术语）
+        assert "halting" in _QUERY_EXTRACT_PROMPT.lower()
+        assert "pondering" in _QUERY_EXTRACT_PROMPT.lower() or \
+               "ponder" in _QUERY_EXTRACT_PROMPT.lower()
+
+    def test_three_queries_flow_through_to_search(self):
+        """v8 SciMON-Q1 端到端：3 条 query 真到达 S2 search"""
+        from darwinian.agents.novelty_booster import _search_prior_work
+        with patch("darwinian.agents.novelty_booster.invoke_with_retry",
+                   return_value=_query_response([
+                       "thinking tokens",   # current
+                       "halting probability adaptive computation",  # classic
+                       "PonderNet ACT Quiet-STaR",  # methodname
+                   ])):
+            qs = _extract_queries(_proposal(), MagicMock())
+        assert len(qs) == 3
+        # 验证 _search_prior_work 对每条 query 都调一次 search_papers
+        with patch("darwinian.agents.novelty_booster.search_papers",
+                   return_value=[{"paperId": "P1"}]) as mock_search:
+            _search_prior_work(qs, 5)
+        assert mock_search.call_count == 3
 
     def test_no_title_no_queries(self):
         with patch("darwinian.agents.novelty_booster.invoke_with_retry",

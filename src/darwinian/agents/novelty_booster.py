@@ -37,16 +37,39 @@ _VALID_OVERLAP_LEVELS = {"none", "partial", "substantial", "identical"}
 # Prompts
 # ---------------------------------------------------------------------------
 
-_QUERY_EXTRACT_PROMPT = """你是 academic search 专家。给定一份研究 proposal，输出 1-2 条
-最能命中"该 proposal 的潜在 prior work"的 S2 搜索 query。
+_QUERY_EXTRACT_PROMPT = """你是 academic search 专家。给定一份研究 proposal，输出 **3 条不同**的
+S2 搜索 query 命中其潜在 prior work，**必须覆盖三种术语角度**。
 
-输出严格 JSON：{"queries": ["query1", "query2"]}
+输出严格 JSON：{"queries": ["q_current", "q_classic", "q_methodname"]}
 
-【约束】
-1. 每条 query 3-7 个英文词，含 proposal 的核心方法名 + 评估指标
-2. 不要太宽（避免命中泛论文），也不要太窄（避免命中不到论文）
-3. 优先用 proposal 提到的具体技术 / 数据集
-4. 输出 1-2 条即可
+【三条 query 必须分别用不同术语角度】
+
+1. **q_current**：用 proposal 自身的术语（current / 时髦词）
+   适合命中近 1-2 年同方向工作。
+   例：proposal 写 "thinking tokens" → query 用 "thinking tokens"
+
+2. **q_classic**：**paraphrase 用经典/foundational 术语**
+   重点在覆盖 SciMON 的关键 blind spot——proposal 的现代术语往往是
+   过去 1-2 年才流行，但同思想的 foundational 论文用更老术语描述。
+   常见映射：
+     thinking tokens / latent reasoning   → adaptive computation / pondering / halting probability / dynamic depth
+     speculative decoding draft           → assisted generation / lookahead / parallel decoding
+     KV cache eviction                    → attention sparsity / token pruning / memory compression
+     mixture of experts routing           → conditional computation / gating
+     chain-of-thought                     → scratchpad / step-by-step reasoning / multi-hop
+     diffusion language model             → non-autoregressive generation / iterative refinement
+   query 必须**显式包含至少 1 个 classic 术语**，禁用 proposal 自己的现代术语。
+   例：proposal 是 "entropy thinking tokens" → query 用 "halting probability adaptive computation reasoning"
+
+3. **q_methodname**：用 proposal 提到的**最近似的具体方法名**（含 acronym）
+   适合命中"被 cite 但 proposal 没强调"的相邻工作。
+   例：proposal 提到自己叫 "EATT"，但 thinking 类的相邻方法有 PonderNet / ACT / Quiet-STaR / STaR / HALT-CoT。
+   query 用 "PonderNet ACT Quiet-STaR thinking" 这种点名串。
+
+【通用约束】
+- 每条 query 3-7 个英文词
+- 不要太宽（避免命中泛论文），也不要太窄（避免命中不到论文）
+- 必须输出 3 条（少于 3 视为不完整）
 """
 
 
@@ -199,8 +222,21 @@ def boost_novelty(
 # Step 1: extract queries
 # ---------------------------------------------------------------------------
 
-def _extract_queries(proposal: ResearchProposal, llm: BaseChatModel) -> list[str]:
-    """让 LLM 抽 1-2 条精确 S2 search query。失败时回退到 title 当 query。"""
+def _extract_queries(
+    proposal: ResearchProposal,
+    llm: BaseChatModel,
+    *,
+    max_queries: int = 3,
+) -> list[str]:
+    """
+    让 LLM 抽 3 条 S2 search query (current / classic / methodname)。
+    失败时回退到 title 当单条 query。
+
+    设计动机：v8 实测发现 EATT 召回 0 prior work，但实际 HALT-CoT / PonderNet /
+    Quiet-STaR 都是高度相关——SciMON 的 query 用了 "thinking tokens" 等近 1-2 年
+    流行词，漏了用经典术语 (halting / pondering / adaptive computation) 描述
+    的 foundational 工作。强制三角度查询关闭这个 blind spot。
+    """
     summary = (
         f"title: {proposal.title}\n"
         f"proposed_method: {proposal.proposed_method[:600]}\n"
@@ -209,13 +245,14 @@ def _extract_queries(proposal: ResearchProposal, llm: BaseChatModel) -> list[str
     try:
         response = invoke_with_retry(llm, [
             SystemMessage(content=_QUERY_EXTRACT_PROMPT),
-            HumanMessage(content=f"研究方案：\n{summary}\n\n请输出 1-2 条搜索 query。"),
+            HumanMessage(content=f"研究方案：\n{summary}\n\n请按 SYSTEM_PROMPT 输出 "
+                                  "3 条 query (current/classic/methodname 三角度)。"),
         ])
         raw = parse_llm_json(response.content)
         queries = raw.get("queries") or []
         cleaned = [q.strip() for q in queries if isinstance(q, str) and q.strip()]
         if cleaned:
-            return cleaned[:2]
+            return cleaned[:max_queries]
     except Exception as e:
         print(f"[novelty_booster] _extract_queries 失败: {type(e).__name__}",
               file=sys.stderr)
