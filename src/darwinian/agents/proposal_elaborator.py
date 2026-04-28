@@ -512,6 +512,18 @@ def _validate_v3(
             (actual_sum, proposal.total_estimated_hours),
         ))
 
+    # Pri-3 #12. VENUE_DEADLINE_INCORRECT: 跟 venue_deadlines lookup 表对照
+    # （v9 实测：NeurIPS 2026 deadline 写成 2026-09-01，实际 5 月）
+    from darwinian.utils.venue_deadlines import is_deadline_correct
+    is_ok, truth_deadline = is_deadline_correct(
+        proposal.target_venue, proposal.target_deadline,
+    )
+    if not is_ok:
+        errors.append((
+            "VENUE_DEADLINE_INCORRECT",
+            (proposal.target_venue, proposal.target_deadline, truth_deadline),
+        ))
+
     return errors
 
 
@@ -579,6 +591,13 @@ def _build_feedback_v3(errors: list[tuple], pack: ResearchMaterialPack) -> str:
                 f"{claimed:.0f}h（差 {abs(actual-claimed):.0f}h）。"
                 "审稿人会查这个数。要么改 phase hours 让加和等于 total，"
                 "要么改 total 等于实际加和"
+            )
+        elif code == "VENUE_DEADLINE_INCORRECT":
+            venue, claimed_dl, truth_dl = detail
+            lines.append(
+                f"  ❌ {venue} 的 deadline 你写成 '{claimed_dl}'，但实际是 "
+                f"'{truth_dl}'（差 30 天以上）。"
+                f"改 target_deadline 为 '{truth_dl}'，并据此调整 fallback_venue 选择"
             )
 
     lines.append("\n请保持其他正确字段不变，只修正以上问题。")

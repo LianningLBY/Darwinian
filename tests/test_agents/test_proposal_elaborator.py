@@ -657,3 +657,37 @@ class TestExpandedWritingKeywords:
         proposal = _build_proposal_v3(raw, _skeleton(), pack)
         codes = [e[0] for e in _validate_v3(proposal, pack)]
         assert "WRITING_PHASE_HAS_GPU_HOURS" in codes
+
+
+# ===========================================================================
+# Pri-3: VENUE_DEADLINE_INCORRECT
+# ===========================================================================
+
+class TestVenueDeadlineValidation:
+    def test_v9_neurips_wrong_deadline_caught(self):
+        """v9 实测：NeurIPS 2026 写成 2026-09-01"""
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["target_venue"] = "NeurIPS 2026"
+        raw["target_deadline"] = "2026-09-01"
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "VENUE_DEADLINE_INCORRECT" in codes
+
+    def test_correct_deadline_passes(self):
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["target_venue"] = "NeurIPS 2026"
+        raw["target_deadline"] = "2026-05-13"
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "VENUE_DEADLINE_INCORRECT" not in codes
+
+    def test_unknown_venue_passes(self):
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        raw["target_venue"] = "ICASSP 2027"
+        raw["target_deadline"] = "2026-12-99"
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        codes = [e[0] for e in _validate_v3(proposal, pack)]
+        assert "VENUE_DEADLINE_INCORRECT" not in codes
