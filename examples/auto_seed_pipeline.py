@@ -151,6 +151,17 @@ def main() -> None:
     md += "\n\n" + render_tournament_overview(tournament, boosted_proposals)
     print(md)
 
+    # ---- S2 调用统计 (Pri-6) ----
+    from darwinian.tools.semantic_scholar import get_s2_stats
+    stats = get_s2_stats()
+    print(
+        f"[auto_seed] S2 stats: {stats['total_lookups']} lookups "
+        f"(cache hit rate: {stats['cache_hit_rate']*100:.1f}%; "
+        f"http: {stats['http_calls']}, 429: {stats['http_429s']}, "
+        f"failures: {stats['http_failures']})",
+        file=sys.stderr,
+    )
+
 
 if __name__ == "__main__":
     main()

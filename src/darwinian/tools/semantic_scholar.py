@@ -35,8 +35,21 @@ CACHE_TTL_SECONDS = int(os.environ.get("DARWINIAN_S2_CACHE_TTL", 7 * 24 * 3600))
 # 默认 1.1s 留 10% buffer，DARWINIAN_S2_MIN_INTERVAL 可覆盖（如有更高 plan）
 _MIN_INTERVAL_SECONDS = float(os.environ.get("DARWINIAN_S2_MIN_INTERVAL", "1.1"))
 _LAST_REQUEST_TIME: float = 0.0
-# 429 时的退避：sleep 指定秒后重试一次，再失败就放弃
-_RETRY_AFTER_429_SECONDS = 5.0
+# Pri-6: 429 改指数退避 3 轮 (5s / 10s / 20s)，比原来 1 轮稳得多
+_429_BACKOFF_SCHEDULE = [5.0, 10.0, 20.0]
+
+# Pri-6: in-memory LRU 加速 session 内重复（disk pickle 慢）
+_INMEM_CACHE: dict = {}
+_INMEM_CACHE_MAX = int(os.environ.get("DARWINIAN_S2_INMEM_CACHE_MAX", "5000"))
+
+# Pri-6: 统计计数器（任意时刻调 print_s2_stats() 看）
+_S2_STATS = {
+    "inmem_hits": 0,
+    "disk_hits": 0,
+    "http_calls": 0,
+    "http_429s": 0,
+    "http_failures": 0,
+}
 
 
 def _api_key() -> str | None:
@@ -89,22 +102,34 @@ def _cache_set(key: str, value: Any) -> None:
 
 def _s2_get(endpoint: str, params: dict[str, Any], *, use_cache: bool = True) -> dict | None:
     """
-    统一 GET 封装：缓存 → 限流 → 请求 → 回写缓存。
+    统一 GET 封装：in-mem cache → disk cache → 限流 → 请求（含指数退避）→ 回写两层 cache。
 
     限流：每次实际 HTTP 请求前确保距上次 S2 请求 >= _MIN_INTERVAL_SECONDS（默认 1.1s）。
     缓存命中不计入限流。
 
-    429 处理：检测到 429 后 sleep _RETRY_AFTER_429_SECONDS（默认 5s）重试一次，再失败放弃。
-
-    失败返回 None（调用方决定降级）。
+    429 处理 (Pri-6): 指数退避 3 轮 (5s / 10s / 20s)，比原来 1 轮稳。
+    任何 HTTP 失败（含全部 429 重试用完）返 None，调用方决定降级。
     """
+    cache_key = _cache_key(endpoint, params) if use_cache else None
+
+    # Layer 1: in-memory LRU
+    if use_cache and cache_key in _INMEM_CACHE:
+        _S2_STATS["inmem_hits"] += 1
+        return _INMEM_CACHE[cache_key]
+
+    # Layer 2: disk pickle
     if use_cache:
-        cached = _cache_get(_cache_key(endpoint, params))
+        cached = _cache_get(cache_key)
         if cached is not None:
+            _S2_STATS["disk_hits"] += 1
+            _inmem_set(cache_key, cached)   # promote 到 in-mem
             return cached
 
-    for attempt in range(2):  # 最多 1 次 429 重试
+    # Layer 3: 网络请求（含指数退避）
+    data = None
+    for attempt, backoff in enumerate(_429_BACKOFF_SCHEDULE):
         _respect_rate_limit()
+        _S2_STATS["http_calls"] += 1
         try:
             with httpx.Client(timeout=30.0) as client:
                 resp = client.get(
@@ -112,22 +137,67 @@ def _s2_get(endpoint: str, params: dict[str, Any], *, use_cache: bool = True) ->
                     params=params,
                     headers=_headers(),
                 )
-            if resp.status_code == 429 and attempt == 0:
-                # 限流碰撞，退避后再试一次
-                print(f"[s2] 429 命中，{_RETRY_AFTER_429_SECONDS}s 后重试...")
-                time.sleep(_RETRY_AFTER_429_SECONDS)
-                continue
+            if resp.status_code == 429:
+                _S2_STATS["http_429s"] += 1
+                if attempt < len(_429_BACKOFF_SCHEDULE) - 1:
+                    print(f"[s2] 429 命中 (round {attempt+1}/{len(_429_BACKOFF_SCHEDULE)})，"
+                          f"{backoff}s 后重试...")
+                    time.sleep(backoff)
+                    continue
+                else:
+                    print(f"[s2] 429 重试 {len(_429_BACKOFF_SCHEDULE)} 次仍失败，放弃")
+                    _S2_STATS["http_failures"] += 1
+                    return None
             resp.raise_for_status()
             data = resp.json()
+            break
         except Exception:
+            _S2_STATS["http_failures"] += 1
             return None
-        break
-    else:
-        return None  # 两次都 429
 
+    if data is None:
+        return None
     if use_cache:
-        _cache_set(_cache_key(endpoint, params), data)
+        _cache_set(cache_key, data)
+        _inmem_set(cache_key, data)
     return data
+
+
+def _inmem_set(key: str, value: Any) -> None:
+    """Pri-6: LRU 简单实现：超 max 时丢一半最老的（dict 保留插入顺序）"""
+    _INMEM_CACHE[key] = value
+    if len(_INMEM_CACHE) > _INMEM_CACHE_MAX:
+        # 删最老的一半
+        n_drop = _INMEM_CACHE_MAX // 2
+        keys_to_drop = list(_INMEM_CACHE.keys())[:n_drop]
+        for k in keys_to_drop:
+            del _INMEM_CACHE[k]
+
+
+def get_s2_stats() -> dict:
+    """返回 session 累计 S2 调用统计 (Pri-6)"""
+    total_lookups = (
+        _S2_STATS["inmem_hits"] + _S2_STATS["disk_hits"] + _S2_STATS["http_calls"]
+    )
+    return {
+        **_S2_STATS,
+        "total_lookups": total_lookups,
+        "cache_hit_rate": (
+            (_S2_STATS["inmem_hits"] + _S2_STATS["disk_hits"]) / total_lookups
+            if total_lookups else 0.0
+        ),
+    }
+
+
+def reset_s2_stats() -> None:
+    """重置统计（测试用）"""
+    for k in _S2_STATS:
+        _S2_STATS[k] = 0
+
+
+def clear_inmem_cache() -> None:
+    """清空 in-memory cache（测试用）"""
+    _INMEM_CACHE.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -287,18 +357,11 @@ def get_papers_batch(
     if cached is not None:
         return cached
 
-    _respect_rate_limit()
-    try:
-        with httpx.Client(timeout=60.0) as client:
-            resp = client.post(
-                f"{SEMANTIC_SCHOLAR_BASE}/paper/batch",
-                params={"fields": fields},
-                json={"ids": paper_ids[:500]},
-                headers=_headers(),
-            )
-        if resp.status_code == 429:
-            time.sleep(_RETRY_AFTER_429_SECONDS)
-            _respect_rate_limit()
+    # Pri-6: 用同样的指数退避 schedule
+    result = None
+    for attempt, backoff in enumerate(_429_BACKOFF_SCHEDULE):
+        _respect_rate_limit()
+        try:
             with httpx.Client(timeout=60.0) as client:
                 resp = client.post(
                     f"{SEMANTIC_SCHOLAR_BASE}/paper/batch",
@@ -306,9 +369,21 @@ def get_papers_batch(
                     json={"ids": paper_ids[:500]},
                     headers=_headers(),
                 )
-        resp.raise_for_status()
-        result = resp.json() or []
-    except Exception:
+            if resp.status_code == 429:
+                _S2_STATS["http_429s"] += 1
+                if attempt < len(_429_BACKOFF_SCHEDULE) - 1:
+                    print(f"[s2 batch] 429 命中 (round {attempt+1}/"
+                          f"{len(_429_BACKOFF_SCHEDULE)})，{backoff}s 后重试...")
+                    time.sleep(backoff)
+                    continue
+                else:
+                    return []
+            resp.raise_for_status()
+            result = resp.json() or []
+            break
+        except Exception:
+            return []
+    if result is None:
         return []
 
     # 防 list 里夹 None

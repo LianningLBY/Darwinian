@@ -205,7 +205,9 @@ class TestS2Get429Retry:
     def test_success_first_try(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
         monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
-        monkeypatch.setattr(ss, "_RETRY_AFTER_429_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_429_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0])
+        ss.clear_inmem_cache()
+        ss.reset_s2_stats()
         client = self._mock_client_with_responses([self._resp(200, {"data": [1]})])
         with patch("httpx.Client", return_value=client):
             data = ss._s2_get("/x", {"q": "test"})
@@ -215,7 +217,9 @@ class TestS2Get429Retry:
     def test_429_then_success_retries(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
         monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
-        monkeypatch.setattr(ss, "_RETRY_AFTER_429_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_429_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0])
+        ss.clear_inmem_cache()
+        ss.reset_s2_stats()
         client = self._mock_client_with_responses([
             self._resp(429),
             self._resp(200, {"ok": True}),
@@ -225,19 +229,21 @@ class TestS2Get429Retry:
         assert data == {"ok": True}
         assert client.get.call_count == 2
 
-    def test_429_twice_gives_up(self, tmp_path, monkeypatch):
+    def test_429_thrice_gives_up(self, tmp_path, monkeypatch):
+        """Pri-6: 改 3 轮指数退避，3 次 429 才放弃"""
         monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
         monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
-        monkeypatch.setattr(ss, "_RETRY_AFTER_429_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_429_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0])
+        ss.clear_inmem_cache()
+        ss.reset_s2_stats()
         client = self._mock_client_with_responses([
-            self._resp(429),
-            self._resp(429),
+            self._resp(429), self._resp(429), self._resp(429),
         ])
         with patch("httpx.Client", return_value=client):
             data = ss._s2_get("/x", {"q": "z"})
         assert data is None
-        # 两次 attempt 都打了
-        assert client.get.call_count == 2
+        # 3 次 attempt 都打了
+        assert client.get.call_count == 3
 
     def test_cache_hit_skips_rate_limit_and_http(self, tmp_path, monkeypatch):
         """缓存命中时既不应打 HTTP 也不应等限流"""
@@ -349,7 +355,9 @@ class TestGetPapersBatch:
     def test_429_then_success(self, tmp_path, monkeypatch):
         monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
         monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
-        monkeypatch.setattr(ss, "_RETRY_AFTER_429_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_429_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0])
+        ss.clear_inmem_cache()
+        ss.reset_s2_stats()
         responses = [self._resp(429), self._resp(200, [{"paperId": "p1"}])]
         client = MagicMock()
         client.__enter__ = MagicMock(return_value=client)
@@ -369,3 +377,113 @@ class TestGetPapersBatch:
             ss.get_papers_batch(ids)
         sent = client.post.call_args.kwargs["json"]
         assert len(sent["ids"]) == 500
+
+
+# ===========================================================================
+# Pri-6: in-memory LRU cache + exponential backoff + stats
+# ===========================================================================
+
+class TestInMemCache:
+    def test_inmem_hit_skips_disk_read(self, tmp_path, monkeypatch):
+        """第二次查同 key 应命中 in-mem，不读 disk"""
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_429_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0])
+        ss.clear_inmem_cache()
+        ss.reset_s2_stats()
+
+        # 第 1 次：mock HTTP 返回数据
+        from unittest.mock import MagicMock
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        resp = MagicMock()
+        resp.status_code = 200
+        resp.json = MagicMock(return_value={"x": 1})
+        resp.raise_for_status = MagicMock()
+        client.get = MagicMock(return_value=resp)
+        with patch("httpx.Client", return_value=client):
+            data1 = ss._s2_get("/test", {"q": "1"})
+        assert data1 == {"x": 1}
+        assert ss._S2_STATS["http_calls"] == 1
+
+        # 第 2 次：不调 HTTP，命中 in-mem
+        with patch("httpx.Client", return_value=client) as mc:
+            data2 = ss._s2_get("/test", {"q": "1"})
+        assert data2 == {"x": 1}
+        assert mc.call_count == 0
+        assert ss._S2_STATS["inmem_hits"] == 1
+
+    def test_inmem_promote_on_disk_hit(self, tmp_path, monkeypatch):
+        """disk 命中时也写一份到 in-mem，下次免读 disk"""
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        ss.clear_inmem_cache()
+        ss.reset_s2_stats()
+        cache_k = ss._cache_key("/test", {"q": "1"})
+        ss._cache_set(cache_k, {"v": 99})
+
+        # 第 1 次：disk hit
+        data1 = ss._s2_get("/test", {"q": "1"})
+        assert data1 == {"v": 99}
+        assert ss._S2_STATS["disk_hits"] == 1
+
+        # 第 2 次：in-mem hit
+        data2 = ss._s2_get("/test", {"q": "1"})
+        assert data2 == {"v": 99}
+        assert ss._S2_STATS["inmem_hits"] == 1
+
+    def test_lru_eviction(self, monkeypatch):
+        """超过 max 时丢一半最老"""
+        monkeypatch.setattr(ss, "_INMEM_CACHE_MAX", 4)
+        ss.clear_inmem_cache()
+        for i in range(6):   # 写 6 个，超 max=4 触发 eviction
+            ss._inmem_set(f"k{i}", f"v{i}")
+        # 触发 eviction 后 cache 应只剩 4 个或更少
+        assert len(ss._INMEM_CACHE) <= 4
+        # 最老的 k0/k1 被丢
+        assert "k0" not in ss._INMEM_CACHE
+
+
+class TestExponentialBackoff:
+    def test_429_then_429_then_success(self, tmp_path, monkeypatch):
+        """3 轮 schedule：第 3 轮成功"""
+        monkeypatch.setattr(ss, "CACHE_DIR", tmp_path)
+        monkeypatch.setattr(ss, "_MIN_INTERVAL_SECONDS", 0.0)
+        monkeypatch.setattr(ss, "_429_BACKOFF_SCHEDULE", [0.0, 0.0, 0.0])
+        ss.clear_inmem_cache()
+        ss.reset_s2_stats()
+
+        from unittest.mock import MagicMock
+        responses = []
+        for status, body in [(429, None), (429, None), (200, {"ok": True})]:
+            r = MagicMock()
+            r.status_code = status
+            r.json = MagicMock(return_value=body)
+            r.raise_for_status = MagicMock()
+            responses.append(r)
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        client.get = MagicMock(side_effect=responses)
+        with patch("httpx.Client", return_value=client):
+            data = ss._s2_get("/test", {"q": "y"})
+        assert data == {"ok": True}
+        assert client.get.call_count == 3
+        assert ss._S2_STATS["http_429s"] == 2
+
+
+class TestS2Stats:
+    def test_get_stats_includes_total(self, tmp_path, monkeypatch):
+        ss.reset_s2_stats()
+        ss._S2_STATS["inmem_hits"] = 5
+        ss._S2_STATS["disk_hits"] = 3
+        ss._S2_STATS["http_calls"] = 2
+        stats = ss.get_s2_stats()
+        assert stats["total_lookups"] == 10
+        assert abs(stats["cache_hit_rate"] - 0.8) < 1e-6
+
+    def test_zero_lookups_safe(self):
+        ss.reset_s2_stats()
+        stats = ss.get_s2_stats()
+        assert stats["total_lookups"] == 0
+        assert stats["cache_hit_rate"] == 0.0
