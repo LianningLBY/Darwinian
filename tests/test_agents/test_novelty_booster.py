@@ -403,3 +403,129 @@ class TestBoostNoveltyEndToEnd:
         assert result.converged is True
         assert result.rounds_taken == 2
         assert result.final_assessment.overlap_level == "none"
+
+
+# ===========================================================================
+# Pri-1: SciMON judge 加严 (auto-upgrade + score-level consistency)
+# ===========================================================================
+
+from darwinian.agents.novelty_booster import (
+    _auto_upgrade_if_self_cited,
+    _enforce_score_level_consistency,
+    _extract_title_keywords,
+)
+
+
+class TestExtractTitleKeywords:
+    def test_acronym_before_colon(self):
+        kws = _extract_title_keywords("PonderNet: Learning to Ponder")
+        assert "PonderNet" in kws
+
+    def test_all_caps_acronym(self):
+        kws = _extract_title_keywords("EAGLE: Speculative Sampling Requires Rethinking")
+        assert "EAGLE" in kws
+
+    def test_no_colon_picks_camelcase(self):
+        kws = _extract_title_keywords("LayerSkip Enabling Early Exit")
+        assert "LayerSkip" in kws
+
+    def test_long_title_caps_at_3(self):
+        kws = _extract_title_keywords(
+            "Some Long Title With Many CamelCase Words Like X Y Z W"
+        )
+        assert len(kws) <= 3
+
+
+class TestAutoUpgradeIfSelfCited:
+    def test_motivation_mentions_closest_upgrades(self):
+        """motivation 含 'PonderNet' 时自动升 substantial"""
+        prop = _proposal(
+            title="MyEAT",
+            motivation="Unlike PonderNet which uses learned halting, we propose...",
+            method="entropy gating",
+        )
+        new_level, new_score = _auto_upgrade_if_self_cited(
+            prop, "PonderNet: Learning to Ponder", "partial", 0.75,
+        )
+        assert new_level == "substantial"
+        assert new_score <= 0.5
+
+    def test_no_mention_no_upgrade(self):
+        prop = _proposal(title="MyEAT", motivation="generic motivation", method="entropy")
+        new_level, new_score = _auto_upgrade_if_self_cited(
+            prop, "PonderNet: Learning to Ponder", "partial", 0.75,
+        )
+        assert new_level == "partial"
+        assert new_score == 0.75
+
+    def test_already_substantial_no_op(self):
+        prop = _proposal(title="MyEAT", motivation="PonderNet is great", method="x")
+        new_level, new_score = _auto_upgrade_if_self_cited(
+            prop, "PonderNet", "substantial", 0.4,
+        )
+        assert new_level == "substantial"
+        assert new_score == 0.4
+
+    def test_method_section_also_checked(self):
+        prop = _proposal(
+            title="MyEAT", motivation="generic",
+            method="we extend EAGLE to support new sampling",
+        )
+        new_level, new_score = _auto_upgrade_if_self_cited(
+            prop, "EAGLE: Speculative Sampling", "partial", 0.7,
+        )
+        assert new_level == "substantial"
+
+
+class TestScoreLevelConsistency:
+    def test_partial_with_low_score_downgrades_to_substantial(self):
+        """v9 实测案例：LLM 标 partial 但 score=0.40 → 应改 substantial"""
+        new_level, new_score = _enforce_score_level_consistency("partial", 0.40)
+        assert new_level == "substantial"
+        assert new_score == 0.40
+
+    def test_consistent_partial_kept(self):
+        new_level, new_score = _enforce_score_level_consistency("partial", 0.70)
+        assert new_level == "partial"
+
+    def test_score_in_identical_range(self):
+        new_level, _ = _enforce_score_level_consistency("partial", 0.15)
+        assert new_level == "identical"
+
+    def test_score_in_none_range(self):
+        new_level, _ = _enforce_score_level_consistency("substantial", 0.95)
+        assert new_level == "none"
+
+    def test_boundary_exact_0_25(self):
+        # 严格 < 0.25 才 identical, 0.25 是 substantial 起点
+        new_level, _ = _enforce_score_level_consistency("partial", 0.25)
+        assert new_level == "substantial"
+
+
+class TestEndToEndStricterBehavior:
+    def test_v9_egat_case_now_correctly_judged(self):
+        """重现 v9 实测：LLM 标 partial=0.70 但 ours.motivation 含 closest_work →
+        应被升级到 substantial 0.50"""
+        from darwinian.agents.novelty_booster import _assess_overlap
+        prop = _proposal(
+            title="EGAT",
+            motivation="Unlike LK Losses which directly optimizes acceptance...",
+            method="entropy-guided",
+        )
+        # mock LLM 给"宽松"判定
+        resp = MagicMock(content=_json.dumps({
+            "closest_paper_id": "X",
+            "closest_title": "LK Losses: Direct Acceptance Optimization",
+            "overlap_level": "partial",
+            "novelty_score": 0.70,
+            "overlap_summary": "both optimize acceptance",
+            "differentiation_gap": "ours uses entropy",
+        }))
+        with patch("darwinian.agents.novelty_booster.invoke_with_retry",
+                   return_value=resp):
+            na = _assess_overlap(prop, [{"paperId": "X", "title": "LK Losses"}],
+                                  "x", MagicMock())
+        # 防御性升级：motivation 提到 "LK" → substantial
+        # 加上 score-level 一致性 (0.5 → substantial)
+        assert na.overlap_level == "substantial"
+        assert na.novelty_score <= 0.5
