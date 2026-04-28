@@ -575,6 +575,16 @@ class ResearchMaterialPack(BaseModel):
         description="failed_ledger 的快照，让 elaborator 主动避开已知失败方向",
     )
 
+    # Round 8: Tournament 多 candidate 时的强制 anchor 指令
+    # （v10 实测发现仅 reorder phenomenon 的列表顺序对 LLM 是 weak signal，
+    # 5 个 candidate 退化成同 idea。改用 explicit prompt directive）
+    anchor_directive: str = Field(
+        default="",
+        description="elaborator prompt 里的强制指令，如 '本 candidate 必须围绕 "
+                    "现象 X (描述...) 构建 motivation，禁止围绕其他 phenomena'。"
+                    "由 multi_elaborate 的 _select_anchors 设置。",
+    )
+
     @property
     def evidence_by_category(self) -> dict[str, list[PaperEvidence]]:
         """按 PaperEvidence.category 分组，给 elaborator 的 existing_methods section 直接用"""

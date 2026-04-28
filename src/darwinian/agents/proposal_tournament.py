@@ -87,10 +87,14 @@ def _select_anchors(
     给每个 candidate 一份不同的 anchor pack：选一个 phenomenon / hook 作主线，
     其他素材保留。返回 N 份变体 pack。
 
+    Round 8 fix: 仅 reorder phenomenon 列表对 LLM 是 weak signal（v10 实测 5
+    candidates 退化成同 idea）。改用 explicit anchor_directive 字段，
+    elaborator prompt 强制围绕该 anchor 构建 motivation。
+
     策略：
     - 优先用 phenomenon 当 anchor（比 hook 更深的 idea 信号）
     - phenomenon 不够 → hook 补
-    - 都不够 → 复用 pack（多样性靠 LLM 温度）
+    - 都不够 → 复用 pack 并在 directive 里说明"自由发挥（无强制 anchor）"
     """
     n_phenomena = len(pack.phenomena)
     n_hooks = len(pack.structural_hole_hooks)
@@ -98,23 +102,46 @@ def _select_anchors(
 
     for i in range(n_candidates):
         if i < n_phenomena:
-            # 把这个 phenomenon 提到第一位（elaborator prompt 默认按顺序看）
             ph_anchor = pack.phenomena[i]
             other_phenomena = [p for j, p in enumerate(pack.phenomena) if j != i]
+            directive = (
+                f"【强制 anchor — 必须遵守】本 candidate 的 motivation 段必须**围绕以下 "
+                f"phenomenon 展开**，不要围绕其他 phenomena 或 entity 组合：\n\n"
+                f"  Type: {ph_anchor.type}\n"
+                f"  Description: {ph_anchor.description}\n"
+                f"  Source paper: {', '.join(ph_anchor.paper_ids)}\n"
+                f"  Suggested research question: {ph_anchor.suggested_question or '(自由发挥)'}\n\n"
+                f"motivation 段的开头第一句话应该直接引用这个 phenomenon。"
+            )
             anchor_packs.append(pack.model_copy(update={
                 "phenomena": [ph_anchor] + other_phenomena,
+                "anchor_directive": directive,
             }))
         elif i < n_phenomena + n_hooks:
-            # 把这个 hook 提到第一位
             h_idx = i - n_phenomena
             h_anchor = pack.structural_hole_hooks[h_idx]
             other_hooks = [h for j, h in enumerate(pack.structural_hole_hooks) if j != h_idx]
+            directive = (
+                f"【强制 anchor — 必须遵守】本 candidate 的 motivation 段必须**围绕以下 "
+                f"结构洞展开**：\n\n"
+                f"  Cross: {h_anchor.entity_a} × {h_anchor.entity_b} ({h_anchor.relation_type})\n"
+                f"  Hook text: {h_anchor.hook_text}\n\n"
+                f"motivation 段必须显式说明为什么这两个概念的交叉值得做。"
+            )
             anchor_packs.append(pack.model_copy(update={
                 "structural_hole_hooks": [h_anchor] + other_hooks,
+                "anchor_directive": directive,
             }))
         else:
-            # 素材不够，复用 pack（多样性靠 LLM 采样温度）
-            anchor_packs.append(pack)
+            # 素材不够，复用 pack（多样性靠 LLM 温度）
+            directive = (
+                f"【candidate {i+1}】无强制 anchor，请用与其他 candidates 不同的 angle "
+                f"展开 motivation。可考虑：(1) 不同 sub-task; (2) 不同 model scale; "
+                f"(3) 不同 evaluation metric。"
+            )
+            anchor_packs.append(pack.model_copy(update={
+                "anchor_directive": directive,
+            }))
 
     return anchor_packs
 

@@ -551,6 +551,7 @@ def _filter_relevant_evidence(
     evidence_list: list[PaperEvidence],
     *,
     strict: bool = False,
+    min_keep: int = 3,
 ) -> list[PaperEvidence]:
     """
     Pri-5: 按 relation_to_direction 过滤无关 PaperEvidence。
@@ -560,27 +561,60 @@ def _filter_relevant_evidence(
 
     默认模式：丢 orthogonal（明确说"跟方向不相关"的）
     严格模式（DARWINIAN_EVIDENCE_STRICT=1）：仅保留 extends + baseline
-      （inspires/reproduces/orthogonal 全丢）—— 用于"宁缺勿滥"场景
 
-    防 v9 实测的 Mamba/Copy-as-Decode 当 padding 引用问题。
+    Round 8 fix: 加 min_keep 保底——v10 实测 8/8 全被标 orthogonal/inspires，
+    导致只剩 1 篇 evidence → 5 candidates 退化成同一个 idea。保底逻辑：
+    过滤后 < min_keep 时按 relation 优先级补回（extends > baseline > inspires
+    > reproduces > orthogonal），保证至少 min_keep 篇喂给 elaborator。
     """
     if not evidence_list:
         return []
     drop_set = _DROP_RELATIONS_STRICT if strict else _DROP_RELATIONS_DEFAULT
     kept: list[PaperEvidence] = []
-    dropped: list[str] = []
+    dropped: list[PaperEvidence] = []
     for ev in evidence_list:
         rel = (ev.relation_to_direction or "").strip().lower()
         if rel in drop_set:
-            dropped.append(f"{ev.short_name or ev.paper_id} ({rel})")
+            dropped.append(ev)
         else:
             kept.append(ev)
+
+    # Round 8 fix: 保底 min_keep
+    backfilled: list[str] = []
+    if len(kept) < min_keep and dropped:
+        # 按 relation 优先级排被丢的
+        priority = ["extends", "baseline", "inspires", "reproduces", "orthogonal"]
+        dropped_sorted = sorted(
+            dropped,
+            key=lambda ev: priority.index((ev.relation_to_direction or "").strip().lower())
+            if (ev.relation_to_direction or "").strip().lower() in priority
+            else 99,
+        )
+        need = min_keep - len(kept)
+        for ev in dropped_sorted[:need]:
+            kept.append(ev)
+            backfilled.append(f"{ev.short_name or ev.paper_id} "
+                              f"({ev.relation_to_direction or '?'})")
+
     mode_str = "strict" if strict else "default"
-    if dropped:
-        print(f"[phase_a] relevance gate ({mode_str}): 丢 {len(dropped)}/"
-              f"{len(evidence_list)} 篇无关: {', '.join(dropped[:5])}"
-              + (f" (+{len(dropped)-5} more)" if len(dropped) > 5 else ""),
-              file=sys.stderr)
+    n_dropped = len(dropped) - len(backfilled)
+    if n_dropped > 0 or backfilled:
+        msg_parts = [f"[phase_a] relevance gate ({mode_str}): "]
+        if n_dropped > 0:
+            dropped_kept = [ev for ev in dropped
+                            if (ev.short_name or ev.paper_id) not in
+                            [b.split(" (")[0] for b in backfilled]]
+            preview = [f"{ev.short_name or ev.paper_id} "
+                       f"({ev.relation_to_direction or '?'})"
+                       for ev in dropped_kept[:5]]
+            msg_parts.append(f"丢 {n_dropped}/{len(evidence_list)} 篇: "
+                             f"{', '.join(preview)}")
+            if n_dropped > 5:
+                msg_parts.append(f" (+{n_dropped-5} more)")
+        if backfilled:
+            msg_parts.append(f"; 保底补回 {len(backfilled)} 篇 "
+                             f"(min_keep={min_keep}): {', '.join(backfilled)}")
+        print("".join(msg_parts), file=sys.stderr)
     else:
         print(f"[phase_a] relevance gate ({mode_str}): 全部 "
               f"{len(evidence_list)} 篇通过", file=sys.stderr)

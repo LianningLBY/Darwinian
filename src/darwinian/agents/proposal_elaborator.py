@@ -194,6 +194,10 @@ def _build_user_message_v3(
         parts.append("\n\n【时间线信号（给 Why Now 提供时间感）】\n"
                      + _render_timeline(pack.timeline_signals))
 
+    # Round 8 fix: 强制 anchor directive (Tournament 多 candidate 时让 idea 真分化)
+    if pack.anchor_directive:
+        parts.append("\n\n" + pack.anchor_directive)
+
     parts.append(
         "\n\n请按 SYSTEM_PROMPT_V3 的 JSON schema 输出完整 ResearchProposal。"
         "key_references 必须全部来自上述 PaperEvidence.paper_id。"

@@ -110,3 +110,49 @@ class TestSpotCheckMotivationNumbers:
         motivation = "9.5x then 2.1x then 5.5x"
         suspicious = spot_check_motivation_numbers(motivation, [ev])
         assert suspicious == sorted(suspicious)
+
+
+class TestPaperIdStripping:
+    """Round 8: 抽数字前先 strip arxiv/S2 paper id"""
+
+    def test_arxiv_id_not_extracted(self):
+        """arxiv:2205.11916 不应被当 motivation 数字"""
+        nums = extract_numbers("see arxiv:2205.11916 for details")
+        assert "2205.11916" not in nums
+        assert "11.916" not in nums   # 也不应被部分匹配
+
+    def test_arxiv_bare_id_not_extracted(self):
+        """裸 arxiv id (无前缀): 2404.16710"""
+        nums = extract_numbers("paper 2404.16710 reports 78.7% accuracy")
+        assert "2404.16710" not in nums
+        assert "78.7%" in nums   # 真正的数字应保留
+
+    def test_s2_hex_id_not_extracted(self):
+        """S2 hex paperId 子串不被当数字: 047/093/789/810/2742"""
+        # v10 实测的真实 paperId
+        text = "see s2:1b6e810ce0afd0dd093f789d2b2742d047e316d5 for prior work"
+        nums = extract_numbers(text)
+        assert all(n not in ["047", "093", "789", "810", "2742", "316"]
+                   for n in nums)
+
+    def test_doi_not_extracted(self):
+        nums = extract_numbers("DOI: 10.1145/3534678.3539107 reports 95% recall")
+        assert "10.1145" not in str(nums)
+        assert "95%" in nums
+
+    def test_url_not_extracted(self):
+        nums = extract_numbers("see https://arxiv.org/abs/2404.16710 for 2.5x speedup")
+        assert "2404.16710" not in nums
+        assert "2.5x" in nums
+
+    def test_legitimate_numbers_still_caught(self):
+        """v9 EGAT 的 27% cherry-pick 数字仍能被抓"""
+        nums = extract_numbers(
+            "see arxiv:2404.16710 — EAGLE drops from 3.01-3.76x to 2.66-2.89x, "
+            "a 27% reduction"
+        )
+        assert "27%" in nums
+        assert "3.01-3.76x" in nums
+        assert "2.66-2.89x" in nums
+        # arxiv ID 不在
+        assert "2404.16710" not in nums

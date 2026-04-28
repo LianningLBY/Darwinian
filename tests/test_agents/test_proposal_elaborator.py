@@ -727,3 +727,26 @@ class TestClaimSpotCheckIntegration:
         from darwinian.state import ResearchProposal as RP
         p = RP(skeleton=_skeleton(), title="t", elevator_pitch="p")
         assert p.unverified_numbers == []
+
+
+# ===========================================================================
+# Round 8b: anchor_directive 强制注入 elaborator prompt
+# ===========================================================================
+
+class TestAnchorDirectiveInjection:
+    def test_directive_present_in_prompt(self):
+        from darwinian.agents.proposal_elaborator import _build_user_message_v3
+        pack = _pack()
+        pack.anchor_directive = (
+            "【强制 anchor】本 candidate 必须围绕 phenomenon X 构建 motivation"
+        )
+        msg = _build_user_message_v3(_skeleton(), pack)
+        assert "【强制 anchor】" in msg
+        assert "phenomenon X" in msg
+
+    def test_no_directive_no_section(self):
+        from darwinian.agents.proposal_elaborator import _build_user_message_v3
+        pack = _pack()
+        # 默认 anchor_directive=""
+        msg = _build_user_message_v3(_skeleton(), pack)
+        assert "【强制 anchor" not in msg

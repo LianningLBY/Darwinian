@@ -815,7 +815,8 @@ class TestRelevanceGate:
             _ev_with_relation("inspires", "PonderNet"),
             _ev_with_relation("reproduces", "Repro"),
         ]
-        kept = _filter_relevant_evidence(evs, strict=True)
+        # min_keep=0 关闭保底，验证 strict 单独行为
+        kept = _filter_relevant_evidence(evs, strict=True, min_keep=0)
         names = [k.short_name for k in kept]
         assert names == ["LayerSkip", "DEL"]
 
@@ -824,7 +825,7 @@ class TestRelevanceGate:
 
     def test_case_insensitive(self):
         ev = _ev_with_relation("ORTHOGONAL", "X")
-        kept = _filter_relevant_evidence([ev])
+        kept = _filter_relevant_evidence([ev], min_keep=0)
         assert kept == []
 
     def test_all_relevant_passes_unchanged(self):
@@ -843,6 +844,41 @@ class TestRelevanceGate:
             _ev_with_relation("orthogonal", "Copy-as-Decode"),
             _ev_with_relation("baseline", "LayerSkip"),
         ]
-        kept = _filter_relevant_evidence(evs)
+        # min_keep=0 关闭保底
+        kept = _filter_relevant_evidence(evs, min_keep=0)
         names = [k.short_name for k in kept]
         assert names == ["EAGLE", "LayerSkip"]
+
+    # ---- Round 8: min_keep 保底逻辑 ----
+
+    def test_min_keep_backfills_when_too_few(self):
+        """v10 实测案例：8 篇全 orthogonal 时保底 3 篇"""
+        evs = [_ev_with_relation("orthogonal", f"P{i}") for i in range(5)]
+        kept = _filter_relevant_evidence(evs, min_keep=3)
+        # 应保 3 篇（即使全 orthogonal 也保）
+        assert len(kept) == 3
+
+    def test_min_keep_backfill_priority(self):
+        """保底按 extends > baseline > inspires > reproduces > orthogonal 排"""
+        evs = [
+            _ev_with_relation("orthogonal", "Ortho"),
+            _ev_with_relation("inspires", "Inspires"),
+            _ev_with_relation("reproduces", "Repro"),
+        ]
+        # 默认模式只丢 orthogonal → kept=2 (Inspires + Repro)
+        # min_keep=3 → 补 1 个 orthogonal
+        kept = _filter_relevant_evidence(evs, min_keep=3)
+        names = [k.short_name for k in kept]
+        assert len(kept) == 3
+        assert "Ortho" in names
+
+    def test_min_keep_does_not_overshoot(self):
+        """保底只补到 min_keep，不超"""
+        evs = [_ev_with_relation("orthogonal", f"P{i}") for i in range(10)]
+        kept = _filter_relevant_evidence(evs, min_keep=3)
+        assert len(kept) == 3
+
+    def test_min_keep_zero_disables_backfill(self):
+        evs = [_ev_with_relation("orthogonal", "X")]
+        kept = _filter_relevant_evidence(evs, min_keep=0)
+        assert kept == []

@@ -33,18 +33,48 @@ _NUMBER_PATTERN = re.compile(
     r"\d+(?:\.\d+)?(?:[\-–]\d+(?:\.\d+)?)?(?:\s*[xX×%]|\s*B|\s*GB|\s*M|\s*hours?)?",
 )
 
+# Round 8 fix: 去掉非数据性数字模式（v10 实测把 paperId 子串 / arxiv ID 误判）
+# 顺序敏感：先去最长 / 最具结构的，避免短模式提前匹配
+_PAPER_ID_PATTERNS = [
+    # arxiv id with optional version: 2205.11916, 2404.16710v2
+    re.compile(r"\b\d{4}\.\d{4,5}(?:v\d+)?\b"),
+    # arxiv: / s2: 前缀 + hex
+    re.compile(r"(?:s2|arxiv):[a-f0-9]{10,}", re.IGNORECASE),
+    # 裸 hex paper id (≥16 hex chars，避免误杀短数字)
+    re.compile(r"\b[a-f0-9]{16,}\b", re.IGNORECASE),
+    # DOI: 10.xxxx/yyyy
+    re.compile(r"\b10\.\d{4,9}/[\w.\-]+\b"),
+    # URL fragments (含 /paper/abc123)
+    re.compile(r"https?://\S+"),
+]
+
+
+def _strip_paper_ids(text: str) -> str:
+    """先去掉 paperId / arxiv id / DOI / URL，避免它们的数字片段被误抽"""
+    cleaned = text
+    for pat in _PAPER_ID_PATTERNS:
+        cleaned = pat.sub(" ", cleaned)
+    return cleaned
+
 
 def extract_numbers(text: str) -> list[str]:
     """
     从文本提取数字 token。返回 normalized 字符串（小写、去内空格）。
 
+    Round 8 fix: 抽数字前先 strip paper IDs（v10 实测把 arxiv:2205.11916 的
+    "2205.11916" 和 S2 hex paperId 的 "047/093/316/789/810/2742" 子串误抽
+    成 motivation 数字）
+
     例：
       "DEL 2.16-2.62x speedup, 5.54 vs 5.60 PPL"
       → ["2.16-2.62x", "5.54", "5.60"]
+      "see arxiv:2205.11916 for 78.7% accuracy"
+      → ["78.7%"]  (2205.11916 被 strip 掉)
     """
     if not text:
         return []
-    raw = _NUMBER_PATTERN.findall(text)
+    cleaned = _strip_paper_ids(text)
+    raw = _NUMBER_PATTERN.findall(cleaned)
     out = []
     for n in raw:
         norm = n.strip().lower().replace(" ", "")

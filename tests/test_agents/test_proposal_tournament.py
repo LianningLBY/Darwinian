@@ -113,11 +113,14 @@ class TestSelectAnchors:
     def test_reuses_pack_when_no_anchors_left(self):
         pack = _pack(n_phenomena=1, n_hooks=1)
         anchors = _select_anchors(pack, n_candidates=4)
-        # 0=phenomenon, 1=hook, 2,3=复用 pack
+        # 0=phenomenon, 1=hook, 2,3=复用 pack（带 directive）
         assert len(anchors) == 4
-        # 复用的 pack 跟原 pack identity 相同
-        assert anchors[2] is pack
-        assert anchors[3] is pack
+        # 0/1 有强制 anchor directive
+        assert "phenomenon" in anchors[0].anchor_directive.lower()
+        assert "结构洞" in anchors[1].anchor_directive
+        # 2/3 没强制 anchor 但有"自由发挥"directive 提示用不同 angle
+        assert "candidate 3" in anchors[2].anchor_directive
+        assert "candidate 4" in anchors[3].anchor_directive
 
 
 # ---------------------------------------------------------------------------
@@ -333,3 +336,35 @@ class TestMultiElaborate:
         assert len(result) == 2
         assert result[0].title == "P0"
         assert result[1].title == "P2"
+
+
+# ===========================================================================
+# Round 8b: anchor_directive 注入每个 candidate
+# ===========================================================================
+
+class TestAnchorDirectiveSetByMultiElaborate:
+    def test_phenomenon_anchor_directive(self):
+        pack = _pack(n_phenomena=3, n_hooks=0)
+        anchors = _select_anchors(pack, n_candidates=3)
+        # 每个 anchor pack 都有 directive 含对应 phenomenon description
+        for i in range(3):
+            assert "强制 anchor" in anchors[i].anchor_directive
+            assert anchors[i].phenomena[0].description in anchors[i].anchor_directive
+        # directive 各不相同
+        directives = [a.anchor_directive for a in anchors]
+        assert len(set(directives)) == 3
+
+    def test_hook_anchor_directive(self):
+        pack = _pack(n_phenomena=0, n_hooks=2)
+        anchors = _select_anchors(pack, n_candidates=2)
+        for a in anchors:
+            assert "结构洞" in a.anchor_directive
+            assert a.structural_hole_hooks[0].entity_a in a.anchor_directive
+
+    def test_fallback_directive_when_no_anchor_left(self):
+        pack = _pack(n_phenomena=0, n_hooks=0)
+        anchors = _select_anchors(pack, n_candidates=3)
+        # 所有 candidate 都用"自由发挥"directive
+        for i, a in enumerate(anchors):
+            assert f"candidate {i+1}" in a.anchor_directive
+            assert "不同的 angle" in a.anchor_directive
