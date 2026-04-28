@@ -33,7 +33,7 @@ _NUMBER_PATTERN = re.compile(
     r"\d+(?:\.\d+)?(?:[\-–]\d+(?:\.\d+)?)?(?:\s*[xX×%]|\s*B|\s*GB|\s*M|\s*hours?)?",
 )
 
-# Round 8 fix: 去掉非数据性数字模式（v10 实测把 paperId 子串 / arxiv ID 误判）
+# Round 8/9a fix: 去掉非数据性数字模式
 # 顺序敏感：先去最长 / 最具结构的，避免短模式提前匹配
 _PAPER_ID_PATTERNS = [
     # arxiv id with optional version: 2205.11916, 2404.16710v2
@@ -44,8 +44,23 @@ _PAPER_ID_PATTERNS = [
     re.compile(r"\b[a-f0-9]{16,}\b", re.IGNORECASE),
     # DOI: 10.xxxx/yyyy
     re.compile(r"\b10\.\d{4,9}/[\w.\-]+\b"),
-    # URL fragments (含 /paper/abc123)
+    # URL fragments
     re.compile(r"https?://\S+"),
+
+    # Round 9a: 模型规模 (Llama-7B / 1.5B / GPT-Neo-2.7B / 540B / 175B / 70b /
+    #          1B/2B/13b/62B/175B), 也覆盖范围 (1-7B / 2-20B)
+    re.compile(r"\b\d+(?:\.\d+)?(?:[\-–]\d+(?:\.\d+)?)?\s*[BMK]\b", re.IGNORECASE),
+    # Round 9a: training steps (1000 steps / 1000-2000 steps / 4000-step)
+    re.compile(
+        r"\b\d+(?:[\-–]\d+)?[\-\s]*(?:steps?|epochs?|iter(?:ations)?)\b",
+        re.IGNORECASE,
+    ),
+    # Round 9a: 倍数对比含范围 (2-4× / 2-5x), 仅丢含 hyphen 的范围避免误吞独立 "2.5x speedup"
+    # 注意：× 是 Unicode 字符，不是 \w，所以末尾不能用 \b（会被立即匹配失败）
+    re.compile(r"\b\d+[\-–]\d+\s*(?:[×]|x\b)", re.IGNORECASE),
+    # Round 9a: 单独的 4000 / 1000 这种 step count 数字（无单位）
+    # 范围 4000-step 上面已抓；这里抓"after 1000 steps" 中的 1000 (前面规则已抓)
+    # 不再加规则避免误吞 motivation 真数字
 ]
 
 

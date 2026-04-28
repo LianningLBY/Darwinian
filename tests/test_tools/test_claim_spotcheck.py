@@ -156,3 +156,87 @@ class TestPaperIdStripping:
         assert "2.66-2.89x" in nums
         # arxiv ID 不在
         assert "2404.16710" not in nums
+
+
+# ===========================================================================
+# Round 9a: strip 模型规模 + training step + 范围倍数
+# ===========================================================================
+
+class TestStripModelSizes:
+    def test_llama_size_not_extracted(self):
+        nums = extract_numbers("Llama-7B achieves 78.7% on MultiArith")
+        assert "7b" not in nums and "7B" not in nums
+        assert "78.7%" in nums
+
+    def test_decimal_size(self):
+        nums = extract_numbers("GPT-2 1.5B and GPT-Neo 2.7B both fail")
+        assert "1.5b" not in nums
+        assert "2.7b" not in nums
+
+    def test_size_range(self):
+        """Llama 1-7B / PaLM 8-62B 这种范围"""
+        nums = extract_numbers("PaLM 8-62B and 540B both improved")
+        assert "8-62b" not in nums
+        assert "540b" not in nums
+
+    def test_uppercase_b(self):
+        nums = extract_numbers("Mistral-7B and 13B variants")
+        assert "7B" not in nums and "7b" not in nums
+        assert "13B" not in nums and "13b" not in nums
+
+
+class TestStripTrainingSteps:
+    def test_steps_filtered(self):
+        nums = extract_numbers("after 1000 steps and 4000 steps")
+        assert "1000" not in nums
+        assert "4000" not in nums
+
+    def test_step_range(self):
+        nums = extract_numbers("CoT degrades after 1000-2000 steps")
+        assert "1000-2000" not in nums
+
+    def test_epochs_also_caught(self):
+        nums = extract_numbers("trained 50 epochs then evaluated")
+        assert "50" not in nums
+
+    def test_iterations_caught(self):
+        nums = extract_numbers("ran 500 iterations on validation")
+        assert "500" not in nums
+
+
+class TestStripRangeMultipliers:
+    def test_range_x_filtered(self):
+        """2-4× / 3-5x 这种范围倍数（不是真 metric）"""
+        nums = extract_numbers("explicit reasoning is 2-4× slower")
+        assert "2-4×" not in nums
+        assert "2-4x" not in nums
+
+    def test_single_x_kept(self):
+        """单个 2.5x speedup 仍保留（合法 metric）"""
+        nums = extract_numbers("achieves 2.5x speedup over baseline")
+        assert "2.5x" in nums
+
+
+class TestV11RegressionAuditClean:
+    """v11 实测的 unverified_numbers 这次应只剩真值得审的（去 1.5b/4000/2-4×）"""
+    def test_v11_motivation_residue(self):
+        """直接复现 v11 的 spot-check 输入 → 只剩百分数"""
+        v11_motivation = (
+            "Chain-of-thought boosts GSM8K by 17.9% (PaLM-540B) and 23.9% (LaMDA-137B). "
+            "CoT-only fine-tuning degrades after 1000-2000 steps while ReAct continues to "
+            "4000 steps on PaLM-8B/62B. "
+            "Self-consistency shows +17.9% on PaLM-540B but only +3-6.8% on UL2-20B. "
+            "Zero-shot-CoT on small models (GPT-2 1.5B: 2.2%, GPT-Neo 2.7B: 1.3%). "
+            "explicit reasoning incurs 2-5× token overhead."
+        )
+        nums = extract_numbers(v11_motivation)
+        # 这些 metadata 应被滤
+        for noise in ["1.5b", "2.7b", "8b", "62b", "20b", "137b", "540b",
+                      "1000-2000", "4000", "2-5×", "2-5x"]:
+            assert noise not in [n.lower() for n in nums], f"误抽 {noise}"
+        # 真 metric 仍保留
+        kept = [n.lower() for n in nums]
+        assert "17.9%" in kept
+        assert "23.9%" in kept
+        assert "2.2%" in kept
+        assert "1.3%" in kept
