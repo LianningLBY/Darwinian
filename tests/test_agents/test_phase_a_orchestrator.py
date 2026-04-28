@@ -770,3 +770,79 @@ class TestBuildSeedPool:
                    side_effect=ConnectionError("net")):
             pool = build_seed_pool("x", MagicMock())
         assert pool == []
+
+
+# ===========================================================================
+# Pri-5: relevance gate
+# ===========================================================================
+
+from darwinian.agents.phase_a_orchestrator import _filter_relevant_evidence
+
+
+def _ev_with_relation(relation: str, name: str = "X"):
+    return PaperEvidence(
+        paper_id=f"arxiv:{name}", title=name, short_name=name,
+        venue="ACL 2024", year=2024,
+        quantitative_claims=[QuantitativeClaim(metric_name="speedup",
+                                                metric_value="2x")],
+        headline_result="2x", relation_to_direction=relation,
+    )
+
+
+class TestRelevanceGate:
+    def test_default_drops_orthogonal_only(self):
+        evs = [
+            _ev_with_relation("extends", "LayerSkip"),
+            _ev_with_relation("orthogonal", "Mamba"),
+            _ev_with_relation("baseline", "DEL"),
+            _ev_with_relation("inspires", "PonderNet"),
+            _ev_with_relation("reproduces", "Repro"),
+        ]
+        kept = _filter_relevant_evidence(evs, strict=False)
+        names = [k.short_name for k in kept]
+        # orthogonal Mamba 被丢，其他留
+        assert "Mamba" not in names
+        assert "LayerSkip" in names
+        assert "DEL" in names
+        assert "PonderNet" in names
+        assert "Repro" in names
+
+    def test_strict_keeps_only_extends_baseline(self):
+        evs = [
+            _ev_with_relation("extends", "LayerSkip"),
+            _ev_with_relation("orthogonal", "Mamba"),
+            _ev_with_relation("baseline", "DEL"),
+            _ev_with_relation("inspires", "PonderNet"),
+            _ev_with_relation("reproduces", "Repro"),
+        ]
+        kept = _filter_relevant_evidence(evs, strict=True)
+        names = [k.short_name for k in kept]
+        assert names == ["LayerSkip", "DEL"]
+
+    def test_empty_input(self):
+        assert _filter_relevant_evidence([]) == []
+
+    def test_case_insensitive(self):
+        ev = _ev_with_relation("ORTHOGONAL", "X")
+        kept = _filter_relevant_evidence([ev])
+        assert kept == []
+
+    def test_all_relevant_passes_unchanged(self):
+        evs = [
+            _ev_with_relation("extends", "A"),
+            _ev_with_relation("baseline", "B"),
+        ]
+        kept = _filter_relevant_evidence(evs)
+        assert len(kept) == 2
+
+    def test_v9_mamba_padding_case(self):
+        """v9 实测：Mamba/Copy-as-Decode 当 padding；用 orthogonal 标后被滤"""
+        evs = [
+            _ev_with_relation("extends", "EAGLE"),
+            _ev_with_relation("orthogonal", "Mamba"),
+            _ev_with_relation("orthogonal", "Copy-as-Decode"),
+            _ev_with_relation("baseline", "LayerSkip"),
+        ]
+        kept = _filter_relevant_evidence(evs)
+        names = [k.short_name for k in kept]
+        assert names == ["EAGLE", "LayerSkip"]

@@ -20,6 +20,7 @@ Phase A Orchestrator — 编排"读"阶段，从研究方向自动产出 Researc
 
 from __future__ import annotations
 
+import os
 import sys
 from typing import Callable
 
@@ -336,6 +337,12 @@ def build_research_material_pack(
     )
     print(f"[phase_a] 深抽取完成: {len(paper_evidence)} 篇成功", file=sys.stderr)
 
+    # ---- Step 4.2: relevance gate (Pri-5) ----
+    # 用 paper_evidence_extractor 已抽出的 relation_to_direction 字段过滤无关论文
+    # （v9 实测 Mamba / Copy-as-Decode 被 elaborator 当 padding 引用的问题）
+    strict_mode = os.environ.get("DARWINIAN_EVIDENCE_STRICT", "0") == "1"
+    paper_evidence = _filter_relevant_evidence(paper_evidence, strict=strict_mode)
+
     # ---- Step 4.5: phenomenon_miner 从全文挖"未解释/意外"现象 ----
     # 比 entity 组合更深的 idea seed（13 个 SOTA 系统都没做的差异化能力）
     print(f"[phase_a] Step 4.5/5: phenomenon_miner 挖论文现象", file=sys.stderr)
@@ -534,6 +541,50 @@ def _make_full_text_provider(
         return ""
 
     return provider
+
+
+_DROP_RELATIONS_DEFAULT = {"orthogonal"}
+_DROP_RELATIONS_STRICT = {"orthogonal", "inspires", "reproduces"}
+
+
+def _filter_relevant_evidence(
+    evidence_list: list[PaperEvidence],
+    *,
+    strict: bool = False,
+) -> list[PaperEvidence]:
+    """
+    Pri-5: 按 relation_to_direction 过滤无关 PaperEvidence。
+
+    paper_evidence_extractor 给每篇标 5 类关系：
+      extends / baseline / inspires / orthogonal / reproduces
+
+    默认模式：丢 orthogonal（明确说"跟方向不相关"的）
+    严格模式（DARWINIAN_EVIDENCE_STRICT=1）：仅保留 extends + baseline
+      （inspires/reproduces/orthogonal 全丢）—— 用于"宁缺勿滥"场景
+
+    防 v9 实测的 Mamba/Copy-as-Decode 当 padding 引用问题。
+    """
+    if not evidence_list:
+        return []
+    drop_set = _DROP_RELATIONS_STRICT if strict else _DROP_RELATIONS_DEFAULT
+    kept: list[PaperEvidence] = []
+    dropped: list[str] = []
+    for ev in evidence_list:
+        rel = (ev.relation_to_direction or "").strip().lower()
+        if rel in drop_set:
+            dropped.append(f"{ev.short_name or ev.paper_id} ({rel})")
+        else:
+            kept.append(ev)
+    mode_str = "strict" if strict else "default"
+    if dropped:
+        print(f"[phase_a] relevance gate ({mode_str}): 丢 {len(dropped)}/"
+              f"{len(evidence_list)} 篇无关: {', '.join(dropped[:5])}"
+              + (f" (+{len(dropped)-5} more)" if len(dropped) > 5 else ""),
+              file=sys.stderr)
+    else:
+        print(f"[phase_a] relevance gate ({mode_str}): 全部 "
+              f"{len(evidence_list)} 篇通过", file=sys.stderr)
+    return kept
 
 
 def _bucket_by_year(
