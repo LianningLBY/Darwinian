@@ -691,3 +691,39 @@ class TestVenueDeadlineValidation:
         proposal = _build_proposal_v3(raw, _skeleton(), pack)
         codes = [e[0] for e in _validate_v3(proposal, pack)]
         assert "VENUE_DEADLINE_INCORRECT" not in codes
+
+
+# ===========================================================================
+# Pri-4: Claim spot-check 集成进 _build_proposal_v3
+# ===========================================================================
+
+class TestClaimSpotCheckIntegration:
+    def test_unverified_numbers_populated(self):
+        """motivation 含 evidence 没有的数字 → unverified_numbers 字段非空"""
+        pack = _pack()  # _pack 里默认有 4 个 method 各 1 个 quant claim 如 "1.50x"
+        raw = _good_v3_response(pack)
+        # 改写 motivation 加一个绝对没在 evidence 里的数字
+        raw["motivation"] = (
+            "Method0 hits 1.50x speedup; we achieve **42.7% reduction** in latency"
+        )
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        # 1.50x 是 evidence 里有的 → 不报
+        assert "1.50x" not in proposal.unverified_numbers
+        # 42.7% 是 motivation 自加的 → 应被标
+        assert any("42.7" in n for n in proposal.unverified_numbers)
+
+    def test_all_grounded_no_unverified(self):
+        pack = _pack()
+        raw = _good_v3_response(pack)
+        # _good_v3_response 默认 motivation 全引 _pack 里的 "1.50x" / "1.80x" / "2.40x"
+        proposal = _build_proposal_v3(raw, _skeleton(), pack)
+        # _good_v3_response motivation 用 evidence 数字 → 应全干净
+        assert proposal.unverified_numbers == [] or all(
+            any(n.startswith(prefix) for prefix in ["1.5", "1.8", "2.4"])
+            for n in proposal.unverified_numbers
+        )
+
+    def test_default_field_empty_list(self):
+        from darwinian.state import ResearchProposal as RP
+        p = RP(skeleton=_skeleton(), title="t", elevator_pitch="p")
+        assert p.unverified_numbers == []

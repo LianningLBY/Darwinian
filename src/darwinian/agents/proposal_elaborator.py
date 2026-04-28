@@ -346,6 +346,16 @@ def _build_proposal_v3(
         for r in key_refs if r in evidence_by_id
     ]
 
+    # Pri-4: claim spot-check (non-blocking)
+    # 标 motivation 中出现但 paper_evidence 找不到的数字，渲染到 seed.md 末尾让用户检查
+    from darwinian.tools.claim_spotcheck import spot_check_motivation_numbers
+    motivation_text = str(raw.get("motivation", ""))
+    unverified = spot_check_motivation_numbers(motivation_text, pack.paper_evidence)
+    if unverified:
+        import sys as _sys
+        print(f"[elaborator_v3] spot-check: motivation 含 {len(unverified)} 个 "
+              f"unverified 数字 (示例: {unverified[:3]})", file=_sys.stderr)
+
     return ResearchProposal(
         skeleton=skeleton,
         status="draft",
@@ -356,7 +366,7 @@ def _build_proposal_v3(
         elevator_pitch=str(raw.get("elevator_pitch", "")),
         challenges=str(raw.get("challenges", "")),
         existing_methods=str(raw.get("existing_methods", "")),
-        motivation=str(raw.get("motivation", "")),
+        motivation=motivation_text,
         proposed_method=str(raw.get("proposed_method", "")),
         technical_details=str(raw.get("technical_details", "")),
         expected_outcomes=str(raw.get("expected_outcomes", "")),    # 兼容字段
@@ -370,6 +380,7 @@ def _build_proposal_v3(
         key_references=key_refs,
         key_references_formatted=krf_raw,
         resource_estimate=resource_est,
+        unverified_numbers=unverified,
     )
 
 

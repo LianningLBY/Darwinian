@@ -518,6 +518,15 @@ class ResearchProposal(BaseModel):
                     "存在时 overlap_level 决定 proposal 可用性",
     )
 
+    # ---- Spot-check: 不在 paper_evidence.quantitative_claims 里的可疑数字 ----
+    # （Pri-4: v9 实测 motivation 写 '27% reduction' 但 evidence 里没有 27%，
+    # LLM 自己算/编了一个数字）
+    unverified_numbers: list[str] = Field(
+        default_factory=list,
+        description="motivation 段含但 paper_evidence 里找不到的数字 token。"
+                    "non-blocking（只标 audit hint），渲染到 seed.md 末尾让用户检查",
+    )
+
 
 class ResearchMaterialPack(BaseModel):
     """

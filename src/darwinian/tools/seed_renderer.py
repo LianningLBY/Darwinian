@@ -79,6 +79,16 @@ def render_proposal(
         parts.append("\n\n## 新颖性评估\n")
         parts.append(_render_novelty(proposal.novelty_assessment))
 
+    # ---- Spot-check audit hint (Pri-4) ----
+    if proposal.unverified_numbers:
+        parts.append("\n\n## ⚠️ Audit: 未在 paper_evidence 找到出处的数字\n")
+        parts.append(
+            "以下数字出现在 motivation 段但 paper_evidence.quantitative_claims 里没出现，"
+            "可能是 LLM 派生计算（合法）或编造（需修）。**请人工核对**：\n\n"
+        )
+        for n in proposal.unverified_numbers:
+            parts.append(f"- `{n}`\n")
+
     return "".join(parts)
 
 

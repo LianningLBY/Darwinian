@@ -243,3 +243,19 @@ class TestNoveltySection:
         assert "arxiv:2505.22179" in md
         assert "both quantize draft model" in md
         assert "ours measures per-layer cliff" in md
+
+
+class TestSpotCheckSection:
+    def test_no_unverified_no_section(self):
+        p = _minimal_proposal()
+        md = render_proposal(p)
+        assert "Audit:" not in md
+
+    def test_unverified_renders_section(self):
+        p = _minimal_proposal(unverified_numbers=["27%", "42.7%", "9.5x"])
+        md = render_proposal(p)
+        assert "## ⚠️ Audit:" in md
+        assert "`27%`" in md
+        assert "`42.7%`" in md
+        assert "`9.5x`" in md
+        assert "请人工核对" in md
