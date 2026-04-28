@@ -35,6 +35,7 @@ from darwinian.state import (
 )
 from darwinian.agents.hook_writer import write_structural_hole_hooks
 from darwinian.agents.phenomenon_miner import batch_mine_phenomena
+from darwinian.agents.contradiction_detector import detect_cross_paper_contradictions
 from darwinian.tools.arxiv_latex_fetcher import fetch_arxiv_latex, render_for_llm
 from darwinian.tools.paper_evidence_extractor import batch_extract_evidence
 from darwinian.tools.semantic_scholar import (
@@ -353,6 +354,16 @@ def build_research_material_pack(
         max_per_paper=3,
     )
     print(f"[phase_a] phenomena: 抽到 {len(phenomena)} 条现象", file=sys.stderr)
+
+    # ---- Step 4.6: cross_paper_contradiction (R9d) ----
+    # 纯规则零 LLM call，扫 quantitative_claims 找跨论文数值矛盾
+    contradictions = detect_cross_paper_contradictions(paper_evidence)
+    if contradictions:
+        print(
+            f"[phase_a] contradictions: 检出 {len(contradictions)} 条跨论文矛盾",
+            file=sys.stderr,
+        )
+        phenomena.extend(contradictions)
 
     # ---- Step 5: timeline_signals ----
     timeline = _bucket_by_year(top_papers, arxiv_id_by_paperid)
