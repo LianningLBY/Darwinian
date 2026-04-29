@@ -40,7 +40,6 @@ from darwinian.state import (
     ResearchConstraints,
     ResearchMaterialPack,
     ResearchProposal,
-    ResearchState,
     ResourceEstimate,
     StructuralHoleHook,
 )
@@ -630,39 +629,3 @@ def _build_feedback_v3(errors: list[tuple], pack: ResearchMaterialPack) -> str:
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# v3 LangGraph 节点 wrapper：从 state.material_pack 读素材
-# ---------------------------------------------------------------------------
-
-def proposal_elaborator_node_v3(
-    state: ResearchState,
-    llm: BaseChatModel,
-) -> dict:
-    """
-    LangGraph 节点：对 state.current_hypothesis.abstraction_tree 中每个 branch 调用
-    elaborate_proposal_from_pack(), 把 material_pack 从 state.material_pack 取。
-
-    LangGraph 节点签名只接受 (state, llm) —— P0 修复（2026-04-27）将 material_pack
-    从 kwarg 改为从 state 读取。phase_a_orchestrator 应在 state 中填充 material_pack
-    后再走到此节点。
-
-    Args:
-        state: ResearchState（必须含 material_pack 和 current_hypothesis.abstraction_tree）
-        llm: 主 LLM
-
-    Returns:
-        {"research_proposals": [...]}（即使空也返字段，方便 LangGraph merge）
-    """
-    proposals: list[ResearchProposal] = []
-    if state.material_pack is None:
-        return {"research_proposals": proposals}
-    if state.current_hypothesis is None or not state.current_hypothesis.abstraction_tree:
-        return {"research_proposals": proposals}
-
-    for skeleton in state.current_hypothesis.abstraction_tree:
-        proposal = elaborate_proposal_from_pack(
-            skeleton=skeleton, material_pack=state.material_pack, llm=llm,
-        )
-        if proposal is not None:
-            proposals.append(proposal)
-    return {"research_proposals": proposals}

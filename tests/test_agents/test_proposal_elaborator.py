@@ -18,7 +18,6 @@ import pytest
 
 from darwinian.agents.proposal_elaborator import (
     elaborate_proposal_from_pack,
-    proposal_elaborator_node_v3,
     _build_proposal_v3,
     _validate_v3,
     _build_user_message_v3,
@@ -29,7 +28,6 @@ from darwinian.state import (
     AbstractionBranch,
     ConceptGraph,
     ExpectedOutcomes,
-    Hypothesis,
     LimitationRef,
     MethodologyPhase,
     PaperEvidence,
@@ -38,7 +36,6 @@ from darwinian.state import (
     ResearchConstraints,
     ResearchMaterialPack,
     ResearchProposal,
-    ResearchState,
     ResourceEstimate,
     StructuralHoleHook,
 )
@@ -348,60 +345,6 @@ class TestElaboratorFromPackEndToEnd:
 # ---------------------------------------------------------------------------
 # v3 LangGraph wrapper
 # ---------------------------------------------------------------------------
-
-class TestNodeV3:
-    """v3 节点从 state.material_pack 读素材（P0 修复后 LangGraph 兼容签名）"""
-
-    def _state_with_branches(self, n=2, material_pack=None):
-        branches = [AbstractionBranch(name=f"B{i}", description="x",
-                                      algorithm_logic="x", math_formulation="y")
-                    for i in range(n)]
-        h = Hypothesis(core_problem="cp", abstraction_tree=branches)
-        return ResearchState(
-            research_direction="x",
-            current_hypothesis=h,
-            material_pack=material_pack,
-        )
-
-    def test_calls_per_branch_when_pack_in_state(self):
-        state = self._state_with_branches(2, material_pack=_pack())
-        good = MagicMock(spec=ResearchProposal)
-        with patch("darwinian.agents.proposal_elaborator.elaborate_proposal_from_pack",
-                   return_value=good) as mock_fn:
-            out = proposal_elaborator_node_v3(state, MagicMock())
-        assert mock_fn.call_count == 2
-        assert len(out["research_proposals"]) == 2
-        # 验证 pack 是从 state 取的（不是 kwarg）
-        assert mock_fn.call_args.kwargs["material_pack"] is state.material_pack
-
-    def test_no_material_pack_in_state_returns_empty(self):
-        state = self._state_with_branches(1, material_pack=None)
-        with patch("darwinian.agents.proposal_elaborator.elaborate_proposal_from_pack") as mock_fn:
-            out = proposal_elaborator_node_v3(state, MagicMock())
-        assert mock_fn.call_count == 0
-        assert out["research_proposals"] == []
-
-    def test_no_hypothesis_returns_empty(self):
-        state = ResearchState(research_direction="x", material_pack=_pack())
-        with patch("darwinian.agents.proposal_elaborator.elaborate_proposal_from_pack") as mock_fn:
-            out = proposal_elaborator_node_v3(state, MagicMock())
-        assert mock_fn.call_count == 0
-        assert out["research_proposals"] == []
-
-    def test_skips_failed_elaborations(self):
-        """部分 branch 返 None 不阻塞，已成功的仍写入"""
-        state = self._state_with_branches(3, material_pack=_pack())
-        results = [MagicMock(spec=ResearchProposal), None, MagicMock(spec=ResearchProposal)]
-        idx = {"i": 0}
-        def fake(*a, **k):
-            r = results[idx["i"]]
-            idx["i"] += 1
-            return r
-        with patch("darwinian.agents.proposal_elaborator.elaborate_proposal_from_pack",
-                   side_effect=fake):
-            out = proposal_elaborator_node_v3(state, MagicMock())
-        assert len(out["research_proposals"]) == 2
-
 
 # ===========================================================================
 # Fix A: 始终从 pack 重建 key_references_formatted（防 LLM 标题幻觉）
