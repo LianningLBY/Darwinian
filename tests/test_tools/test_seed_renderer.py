@@ -245,6 +245,32 @@ class TestNoveltySection:
         assert "ours measures per-layer cliff" in md
 
 
+class TestRelevanceWarningBanner:
+    """R10-Pri-2: Phase A relevance warning 渲染 banner"""
+
+    def test_no_warning_no_banner(self):
+        from darwinian.state import ResearchMaterialPack
+        p = _minimal_proposal()
+        pack = ResearchMaterialPack(direction="d")
+        md = render_proposal(p, material_pack=pack)
+        assert "Phase A Relevance Warning" not in md
+
+    def test_warning_renders_banner_at_top(self):
+        from darwinian.state import ResearchMaterialPack
+        p = _minimal_proposal()
+        pack = ResearchMaterialPack(
+            direction="d",
+            relevance_warning="仅找到 3 篇真相关论文，已用 5 篇 orthogonal 兜底",
+        )
+        md = render_proposal(p, material_pack=pack)
+        assert "⚠️ **Phase A Relevance Warning**" in md
+        assert "3 篇真相关" in md
+        # 必须在 metadata 块之前（即 banner 在 title 后立刻出现）
+        banner_pos = md.find("Phase A Relevance Warning")
+        meta_pos = md.find("**状态**")
+        assert banner_pos < meta_pos
+
+
 class TestFeasibilityChallengeSection:
     """R9c: Feasibility Challenger 渲染"""
 

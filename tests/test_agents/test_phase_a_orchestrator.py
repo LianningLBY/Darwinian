@@ -882,3 +882,48 @@ class TestRelevanceGate:
         evs = [_ev_with_relation("orthogonal", "X")]
         kept = _filter_relevant_evidence(evs, min_keep=0)
         assert kept == []
+
+    # ---- R10-Pri-2: out_stats + relevance warning ----
+
+    def test_out_stats_truly_relevant_count(self):
+        """out_stats 必须报真相关数（backfill 之前的 kept 数）"""
+        evs = [
+            _ev_with_relation("extends", "A"),
+            _ev_with_relation("baseline", "B"),
+            _ev_with_relation("orthogonal", "C"),
+        ]
+        stats: dict = {}
+        _filter_relevant_evidence(evs, min_keep=0, out_stats=stats)
+        assert stats["truly_relevant"] == 2
+        assert stats["backfilled"] == 0
+
+    def test_out_stats_distinguishes_truly_relevant_from_backfill(self):
+        """v2 加密流量场景：3 真相关 + 5 兜底 → stats 分开报"""
+        evs = (
+            [_ev_with_relation("extends", f"R{i}") for i in range(2)]
+            + [_ev_with_relation("orthogonal", f"O{i}") for i in range(5)]
+        )
+        stats: dict = {}
+        _filter_relevant_evidence(evs, min_keep=4, out_stats=stats)
+        assert stats["truly_relevant"] == 2
+        assert stats["backfilled"] == 2
+
+    def test_relevance_warning_triggers_below_threshold(self):
+        """truly_relevant < 5 → warning 非空"""
+        from darwinian.agents.phase_a_orchestrator import _build_relevance_warning
+        warning = _build_relevance_warning(truly_relevant=3, backfilled=3)
+        assert warning != ""
+        assert "3" in warning  # 提到当前数
+        assert "orthogonal" in warning.lower()
+
+    def test_relevance_warning_silent_when_sufficient(self):
+        """truly_relevant ≥ 5 → 空 warning"""
+        from darwinian.agents.phase_a_orchestrator import _build_relevance_warning
+        assert _build_relevance_warning(truly_relevant=8, backfilled=0) == ""
+        assert _build_relevance_warning(truly_relevant=5, backfilled=0) == ""
+
+    def test_empty_input_out_stats(self):
+        """空输入也要填 out_stats（zero values）"""
+        stats: dict = {}
+        _filter_relevant_evidence([], out_stats=stats)
+        assert stats == {"truly_relevant": 0, "backfilled": 0, "dropped": 0}

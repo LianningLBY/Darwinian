@@ -644,6 +644,18 @@ class ResearchMaterialPack(BaseModel):
                     "由 multi_elaborate 的 _select_anchors 设置。",
     )
 
+    # R10-Pri-2: Phase A relevance gate 真相关论文不足时的警告
+    # （v2 LIVE 实测加密流量方向只有 3 篇真相关，5 篇 orthogonal 兜底，
+    # elaborator 拿 surface code 当主弹药硬拗 cross-domain 类比 → R9c 戳穿
+    # "quantum analogy hand-waved"。要在 elaborator prompt 注入警告 + seed
+    # 渲染顶部 banner，避免下游硬拗。）
+    relevance_warning: str = Field(
+        default="",
+        description="非空表示 Phase A 真相关论文 < 阈值，已用 orthogonal 兜底。"
+                    "elaborator system prompt 会注入此警告，禁止把 orthogonal 论文当主弹药；"
+                    "seed_renderer 会在顶部插入 ⚠️ banner",
+    )
+
     @property
     def evidence_by_category(self) -> dict[str, list[PaperEvidence]]:
         """按 PaperEvidence.category 分组，给 elaborator 的 existing_methods section 直接用"""

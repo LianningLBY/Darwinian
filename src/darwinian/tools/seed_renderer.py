@@ -40,6 +40,14 @@ def render_proposal(
     title = proposal.title or "(待补标题)"
     parts.append(f"# {title}\n\n")
 
+    # R10-Pri-2: relevance warning banner（Phase A 真相关论文不足时立即提醒）
+    if material_pack is not None and material_pack.relevance_warning:
+        parts.append(
+            "> ⚠️ **Phase A Relevance Warning**: "
+            + material_pack.relevance_warning
+            + "\n\n"
+        )
+
     seed_text = proposal.seed or (material_pack.direction if material_pack else "")
     parts.append(_render_metadata_block(proposal, seed_text))
 

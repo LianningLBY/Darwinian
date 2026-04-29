@@ -198,6 +198,17 @@ def _build_user_message_v3(
     if pack.anchor_directive:
         parts.append("\n\n" + pack.anchor_directive)
 
+    # R10-Pri-2 fix: relevance warning（Phase A 真相关论文不足时注入）
+    # 防止 elaborator 把 orthogonal 兜底论文当主弹药硬拗 cross-domain 类比
+    if pack.relevance_warning:
+        parts.append(
+            "\n\n【⚠️ relevance warning — 必须遵守】\n"
+            + pack.relevance_warning
+            + "\n\n具体执行：motivation 段**禁止引用** relation_to_direction == "
+            "'orthogonal' 的 PaperEvidence；这些论文只能在 existing_methods 段作为"
+            "「相关但非直接」的背景提及，不要拿它们当 cross-domain analogy 的核心论据。"
+        )
+
     parts.append(
         "\n\n请按 SYSTEM_PROMPT_V3 的 JSON schema 输出完整 ResearchProposal。"
         "key_references 必须全部来自上述 PaperEvidence.paper_id。"

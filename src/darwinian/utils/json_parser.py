@@ -30,6 +30,11 @@ def parse_llm_json(content: str) -> dict:
     # 处理未关闭的 <think> 块（无 </think> 结束标签，可能被截断）
     # JSON 实际输出在思考内容之后，从后往前找第一个「看起来像 JSON」的 { 行
     # 判断标准：该行以 { 开头，且后续内容含有 "key": 模式（数学公式里的 { 不含此结构）
+    #
+    # R10-Pri-4 fix: v2 LIVE 实测 LLM 在 <think> 内写中文字段如「**用户的研究方向**」
+    # 含 ":" 会触发误抓，结果把 thinking 当 JSON 解析、报 column 7000+ 错误。
+    # 加防御：candidate 必须含 ≥1 对花括号平衡的结构（开闭计数能到 0），且
+    # 至少 2 个 "key": 对（孤立的 ":" 可能是 markdown 列表）
     if re.search(r"<think>", text, re.IGNORECASE):
         lines = text.splitlines()
         found = False
@@ -37,11 +42,18 @@ def parse_llm_json(content: str) -> dict:
             stripped_line = lines[i].strip()
             if stripped_line.startswith("{") or stripped_line.startswith("["):
                 candidate = "\n".join(lines[i:]).strip()
-                # 必须包含至少一个 JSON 键值模式，排除数学公式中的花括号
-                if re.search(r'"[^"]{1,60}"\s*:', candidate):
-                    text = candidate
-                    found = True
-                    break
+                # 必须包含 ≥2 个 JSON 键值模式（"key": 形式，key 是字母数字+下划线）
+                # 中文 markdown「**字段**: 值」不会匹配，因为 key 必须是 ASCII identifier
+                kv_matches = re.findall(r'"[A-Za-z_][\w\-]{0,60}"\s*:', candidate)
+                if len(kv_matches) < 2:
+                    continue
+                # 花括号 / 方括号至少出现一对开闭（避免抓到只有 { 没有 } 的乱码）
+                if candidate.count("{") < 1 or candidate.count("}") < 1:
+                    if candidate.count("[") < 1 or candidate.count("]") < 1:
+                        continue
+                text = candidate
+                found = True
+                break
         # 若整个响应都在 <think> 里（LLM 输出被截断），保持 text 不变
         # 后续解析会失败并抛出清晰的 JSONDecodeError，由调用方处理
 

@@ -342,7 +342,16 @@ def build_research_material_pack(
     # 用 paper_evidence_extractor 已抽出的 relation_to_direction 字段过滤无关论文
     # （v9 实测 Mamba / Copy-as-Decode 被 elaborator 当 padding 引用的问题）
     strict_mode = os.environ.get("DARWINIAN_EVIDENCE_STRICT", "0") == "1"
-    paper_evidence = _filter_relevant_evidence(paper_evidence, strict=strict_mode)
+    rel_stats: dict = {}
+    paper_evidence = _filter_relevant_evidence(
+        paper_evidence, strict=strict_mode, out_stats=rel_stats,
+    )
+    relevance_warning = _build_relevance_warning(
+        rel_stats.get("truly_relevant", 0),
+        rel_stats.get("backfilled", 0),
+    )
+    if relevance_warning:
+        print(f"[phase_a] ⚠️ relevance_warning: {relevance_warning}", file=sys.stderr)
 
     # ---- Step 4.5: phenomenon_miner 从全文挖"未解释/意外"现象 ----
     # 比 entity 组合更深的 idea seed（13 个 SOTA 系统都没做的差异化能力）
@@ -377,6 +386,7 @@ def build_research_material_pack(
         phenomena=phenomena,
         timeline_signals=timeline,
         prior_failures=[],
+        relevance_warning=relevance_warning,
     )
 
 
@@ -563,6 +573,7 @@ def _filter_relevant_evidence(
     *,
     strict: bool = False,
     min_keep: int = 3,
+    out_stats: dict | None = None,
 ) -> list[PaperEvidence]:
     """
     Pri-5: 按 relation_to_direction 过滤无关 PaperEvidence。
@@ -579,6 +590,10 @@ def _filter_relevant_evidence(
     > reproduces > orthogonal），保证至少 min_keep 篇喂给 elaborator。
     """
     if not evidence_list:
+        if out_stats is not None:
+            out_stats["truly_relevant"] = 0
+            out_stats["backfilled"] = 0
+            out_stats["dropped"] = 0
         return []
     drop_set = _DROP_RELATIONS_STRICT if strict else _DROP_RELATIONS_DEFAULT
     kept: list[PaperEvidence] = []
@@ -589,6 +604,8 @@ def _filter_relevant_evidence(
             dropped.append(ev)
         else:
             kept.append(ev)
+
+    n_truly_relevant = len(kept)   # backfill 之前的"真相关"数
 
     # Round 8 fix: 保底 min_keep
     backfilled: list[str] = []
@@ -629,7 +646,37 @@ def _filter_relevant_evidence(
     else:
         print(f"[phase_a] relevance gate ({mode_str}): 全部 "
               f"{len(evidence_list)} 篇通过", file=sys.stderr)
+    if out_stats is not None:
+        out_stats["truly_relevant"] = n_truly_relevant
+        out_stats["backfilled"] = len(backfilled)
+        out_stats["dropped"] = n_dropped
     return kept
+
+
+def _build_relevance_warning(
+    truly_relevant: int,
+    backfilled: int,
+    *,
+    min_truly_relevant: int = 5,
+) -> str:
+    """
+    R10-Pri-2: 真相关论文不足时返回 warning 字符串，否则空。
+
+    阈值 5 是经验值：
+    - 加密流量 v2 LIVE: 3 真相关 + 3 兜底 → elaborator 硬拗，应警告
+    - LLM inference v11: 8 真相关 + 0 兜底 → 不警告
+    - 一般 NeurIPS-tier paper 引用 ≥10 篇相关 prior work，5 篇是 motivation 最低线
+    """
+    if truly_relevant >= min_truly_relevant:
+        return ""
+    return (
+        f"Phase A 仅找到 {truly_relevant} 篇真相关论文 (extends/baseline/inspires/"
+        f"reproduces；阈值 {min_truly_relevant})，已用 {backfilled} 篇 orthogonal "
+        f"兜底以避免 evidence 全空。**elaborator 不要把 orthogonal 兜底论文当 "
+        f"motivation 主弹药**——它们与本方向不相关，强行类比会产出 hand-waved "
+        f"cross-domain 论证。建议换更聚焦的 sub-direction，让 Phase A 拉到 "
+        f"≥{min_truly_relevant} 篇真相关论文再跑。"
+    )
 
 
 def _bucket_by_year(

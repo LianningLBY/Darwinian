@@ -157,6 +157,36 @@ class TestPairwiseCompare:
         assert m.winner == "tie"
         assert m.rubric_scores["novelty"] == "a"
 
+    def test_user_msg_includes_phases(self):
+        """R10-Pri-1: pairwise_compare 的 user_msg 必须含 phases 信息（feasibility 维度需要）"""
+        from darwinian.agents.proposal_tournament import _format_proposal_for_match
+        from darwinian.state import MethodologyPhase
+        p = ResearchProposal(
+            skeleton=AbstractionBranch(
+                name="x", description="x", algorithm_logic="x", math_formulation="x",
+            ),
+            title="P", elevator_pitch="pitch", motivation="m", proposed_method="meth",
+            technical_details="tech_specifics_here",
+            methodology_phases=[
+                MethodologyPhase(
+                    phase_number=1, name="train_baseline", description="train transformer",
+                    expected_compute_hours=80.0,
+                ),
+                MethodologyPhase(
+                    phase_number=2, name="ablation", description="ablation studies",
+                    expected_compute_hours=40.0,
+                ),
+            ],
+            total_estimated_hours=120.0,
+            fits_resource_budget=True,
+        )
+        msg = _format_proposal_for_match(p, "A")
+        assert "P1 (80.0h)" in msg
+        assert "P2 (40.0h)" in msg
+        assert "train_baseline" in msg
+        assert "tech_specifics_here" in msg
+        assert "fits_budget=True" in msg
+
     def test_invalid_rubric_filtered(self):
         resp = MagicMock(content=_json.dumps({
             "winner": "a",
@@ -219,6 +249,30 @@ class TestEloMath:
         # 但 elo 都 < A
         assert rankings[1]["elo"] < rankings[0]["elo"]
         assert rankings[2]["elo"] < rankings[0]["elo"]
+
+    def test_multi_pass_deterministic(self):
+        """R10-Pri-5: 同一 input 跑两次 compute_elo_rankings (默认 seed) 必须一致"""
+        matches = [
+            TournamentMatch(proposal_a_id="A", proposal_b_id="B", winner="a"),
+            TournamentMatch(proposal_a_id="A", proposal_b_id="C", winner="a"),
+            TournamentMatch(proposal_a_id="B", proposal_b_id="C", winner="tie"),
+        ]
+        r1 = compute_elo_rankings(["A", "B", "C"], matches)
+        r2 = compute_elo_rankings(["A", "B", "C"], matches)
+        assert [(r["proposal_id"], r["elo"]) for r in r1] == \
+               [(r["proposal_id"], r["elo"]) for r in r2]
+
+    def test_multi_pass_reduces_order_variance(self):
+        """R10-Pri-5: shuffled n_passes 后 B / C（对称战绩）的 Elo 应非常接近"""
+        matches = [
+            TournamentMatch(proposal_a_id="A", proposal_b_id="B", winner="a"),
+            TournamentMatch(proposal_a_id="A", proposal_b_id="C", winner="a"),
+            TournamentMatch(proposal_a_id="B", proposal_b_id="C", winner="tie"),
+        ]
+        rankings = compute_elo_rankings(["A", "B", "C"], matches, n_passes=20)
+        rest = [r for r in rankings if r["proposal_id"] != "A"]
+        # 两个对称战绩的 Elo 差应 < 5（单 pass 时可能差 ~16）
+        assert abs(rest[0]["elo"] - rest[1]["elo"]) < 5
 
     def test_elo_unknown_id_skipped(self):
         """match 含未知 id 时不崩，跳过该 match"""
