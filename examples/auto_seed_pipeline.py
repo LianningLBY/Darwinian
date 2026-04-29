@@ -163,6 +163,20 @@ def main() -> None:
     else:
         print(f"[auto_seed] R9c 失败（LLM error），跳过", file=sys.stderr)
 
+    # ---- R11: Mechanism Alignment Checker (仅 top-1, 仅 cross-domain 触发) ----
+    from darwinian.agents.mechanism_alignment_checker import check_mechanism_alignment
+    print(f"[auto_seed] R11 启动 —— Mechanism Alignment 跨域类比 critique", file=sys.stderr)
+    ma = check_mechanism_alignment(proposal=top_proposal, llm=extractor_llm)
+    if ma is not None:
+        top_proposal.mechanism_alignment = ma
+        print(
+            f"[auto_seed] R11 完成: is_cross_domain={ma.is_cross_domain}, "
+            f"verdict={ma.overall_verdict}",
+            file=sys.stderr,
+        )
+    else:
+        print(f"[auto_seed] R11 失败（LLM error），跳过", file=sys.stderr)
+
     md = render_proposal(top_proposal, material_pack=pack)
     md += "\n\n" + render_tournament_overview(tournament, boosted_proposals)
     print(md)

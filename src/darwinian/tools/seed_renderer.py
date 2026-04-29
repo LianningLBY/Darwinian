@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from darwinian.state import (
     FeasibilityChallenge,
+    MechanismAlignment,
     NoveltyAssessment,
     ResearchMaterialPack,
     ResearchProposal,
@@ -91,6 +92,11 @@ def render_proposal(
     # ---- Feasibility Challenger 攻击结果 (R9c) ----
     if proposal.feasibility_challenge is not None:
         parts.append(_render_feasibility_challenge(proposal.feasibility_challenge))
+
+    # ---- Mechanism Alignment Checker 结果 (R11) ----
+    # 仅 cross-domain 类比的 proposal 才渲染（避免 not_applicable 的空 section）
+    if proposal.mechanism_alignment is not None and proposal.mechanism_alignment.is_cross_domain:
+        parts.append(_render_mechanism_alignment(proposal.mechanism_alignment))
 
     # ---- Spot-check audit hint (Pri-4) ----
     if proposal.unverified_numbers:
@@ -274,6 +280,49 @@ def _render_feasibility_challenge(fc: FeasibilityChallenge) -> str:
         )
         if r.mitigation:
             parts.append(f"  - *mitigation*: {r.mitigation}\n")
+    return "".join(parts)
+
+
+def _render_mechanism_alignment(ma: MechanismAlignment) -> str:
+    """
+    渲染 R11 Mechanism Alignment Checker 输出。
+
+    使用 emoji 让 PI 一眼看到 verdict：
+    🟢 aligned / 🟡 loose_analogy / 🔴 hand_waved
+    各维度也用 emoji：✅ aligned / 🟡 loose / ❌ broken
+    """
+    overall_icon = {
+        "aligned": "🟢",
+        "loose_analogy": "🟡",
+        "hand_waved": "🔴",
+        "not_applicable": "⚪",
+    }
+    dim_icon = {"aligned": "✅", "loose": "🟡", "broken": "❌"}
+    dim_label = {
+        "formal_correspondence": "Formal correspondence",
+        "assumption_correspondence": "Assumption correspondence",
+        "metric_correspondence": "Metric correspondence",
+        "invariant_correspondence": "Invariant correspondence",
+        "scaling_correspondence": "Scaling correspondence",
+    }
+    parts = ["\n\n## ⚠️ Mechanism Alignment (R11 cross-domain check)\n\n"]
+    parts.append(
+        f"**Verdict**: {overall_icon.get(ma.overall_verdict, '')} `{ma.overall_verdict}`\n\n"
+    )
+    if ma.source_domain or ma.target_domain:
+        parts.append(
+            f"**Cross-domain mapping**: `{ma.source_domain}` → `{ma.target_domain}`\n\n"
+        )
+    if ma.recommendation:
+        parts.append(f"**Recommendation**: {ma.recommendation}\n\n")
+    if not ma.dimensions:
+        parts.append("_(no dimensional critique reported)_\n")
+        return "".join(parts)
+    parts.append("**Dimensional breakdown**:\n\n")
+    for d in ma.dimensions:
+        icon = dim_icon.get(d.verdict, "")
+        label = dim_label.get(d.dimension, d.dimension)
+        parts.append(f"- {icon} **{label}** [{d.verdict}]: {d.explanation}\n")
     return "".join(parts)
 
 

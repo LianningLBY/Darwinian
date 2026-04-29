@@ -245,6 +245,55 @@ class TestNoveltySection:
         assert "ours measures per-layer cliff" in md
 
 
+class TestMechanismAlignmentSection:
+    """R11: Mechanism Alignment Checker 渲染"""
+
+    def _ma_hand_waved(self):
+        from darwinian.state import MechanismAlignment, MechanismAlignmentDimension
+        return MechanismAlignment(
+            is_cross_domain=True,
+            source_domain="quantum error correction",
+            target_domain="encrypted traffic classification",
+            dimensions=[
+                MechanismAlignmentDimension(
+                    dimension="formal_correspondence", verdict="broken",
+                    explanation="qubit Hilbert space != continuous feature space",
+                ),
+                MechanismAlignmentDimension(
+                    dimension="metric_correspondence", verdict="loose",
+                    explanation="trace distance vague analog to KL",
+                ),
+            ],
+            overall_verdict="hand_waved",
+            recommendation="rewrite motivation without quantum analogy",
+        )
+
+    def test_no_alignment_no_section(self):
+        p = _minimal_proposal()
+        md = render_proposal(p)
+        assert "Mechanism Alignment" not in md
+
+    def test_not_applicable_no_section(self):
+        from darwinian.state import MechanismAlignment
+        ma = MechanismAlignment(
+            is_cross_domain=False, overall_verdict="not_applicable",
+        )
+        p = _minimal_proposal(mechanism_alignment=ma)
+        md = render_proposal(p)
+        assert "Mechanism Alignment" not in md
+
+    def test_hand_waved_renders(self):
+        p = _minimal_proposal(mechanism_alignment=self._ma_hand_waved())
+        md = render_proposal(p)
+        assert "## ⚠️ Mechanism Alignment" in md
+        assert "hand_waved" in md
+        assert "quantum error correction" in md
+        assert "encrypted traffic classification" in md
+        assert "Formal correspondence" in md
+        assert "[broken]" in md
+        assert "rewrite motivation" in md
+
+
 class TestRelevanceWarningBanner:
     """R10-Pri-2: Phase A relevance warning 渲染 banner"""
 

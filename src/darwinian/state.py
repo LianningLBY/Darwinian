@@ -403,6 +403,79 @@ class FeasibilityChallenge(BaseModel):
     )
 
 
+class MechanismAlignmentDimension(BaseModel):
+    """
+    R11 单维度 critique 结果。Mechanism Alignment Checker 在 5 个维度上分别打分。
+    """
+    dimension: Literal[
+        "formal_correspondence",
+        "assumption_correspondence",
+        "metric_correspondence",
+        "invariant_correspondence",
+        "scaling_correspondence",
+    ] = Field(description=(
+        "维度："
+        "formal_correspondence=A 域对象 (state space, operator) 跟 B 域对象有无同构/同伦映射；"
+        "assumption_correspondence=A 域关键假设 (i.i.d. noise, unitarity, smoothness) 在 B 域是否成立；"
+        "metric_correspondence=A 域用的距离 / 范数 (trace distance, fidelity) 在 B 域有意义吗；"
+        "invariant_correspondence=A 域核心定理 (threshold theorem, decoupling, conservation) 在 B 域是否还成立；"
+        "scaling_correspondence=A 域的 scaling law 跟 B 域是否真有结构相似"
+    ))
+    verdict: Literal["aligned", "loose", "broken"] = Field(
+        description="aligned=有真正的数学对应（同构/同态/可证 transfer）；"
+                    "loose=只是启发性类比（vague resemblance）；"
+                    "broken=结构不对应（数学上立不住）",
+    )
+    explanation: str = Field(
+        description="一句话说明 (≤80 词)，引用具体对象/算子/假设。"
+                    "broken 时必须说清楚哪里数学上对不上",
+    )
+
+
+class MechanismAlignment(BaseModel):
+    """
+    R11 Mechanism Alignment Checker 对 cross-domain 类比的完整科学合理性评估。
+
+    设计动机：v2 LIVE 实测「量子纠错码 → 加密流量分类」这条 idea 工程上完全跑通，
+    R9c 只把 hand-waved 类比标 MEDIUM。但它真正的硬伤是**数学结构不对应**：
+    qubit Hilbert space ≠ 连续特征空间，Pauli channel ≠ 分布漂移。R9c 攻击工程
+    可行性，本模块攻击科学合理性，两者互补。
+
+    HindSight 2026 / Si et al. / DeepReview / Co-Scientist 都没专门做这个 — 是
+    Darwinian 独有的差异化能力。
+
+    Non-blocking：仅给 PI 警告 + 重写建议，不阻塞 pipeline。
+    """
+    is_cross_domain: bool = Field(
+        default=False,
+        description="motivation 是否真的在做 cross-domain 类比。False 时 dimensions/verdict 都无意义",
+    )
+    source_domain: str = Field(
+        default="",
+        description="类比的源域，如 'quantum error correction', 'thermodynamics'",
+    )
+    target_domain: str = Field(
+        default="",
+        description="类比的目标域，如 'encrypted traffic classification'",
+    )
+    dimensions: list[MechanismAlignmentDimension] = Field(
+        default_factory=list,
+        description="5 个维度的 critique；如果 is_cross_domain=False 可为空",
+    )
+    overall_verdict: Literal["aligned", "loose_analogy", "hand_waved", "not_applicable"] = Field(
+        default="not_applicable",
+        description="aligned=类比有真实数学对应，可以用；"
+                    "loose_analogy=启发性关系，建议把 motivation 措辞从 'derived from' 改成 'inspired by'；"
+                    "hand_waved=数学结构不对应，建议放弃这个 framing 重写 motivation；"
+                    "not_applicable=不是 cross-domain 类比，不评估",
+    )
+    recommendation: str = Field(
+        default="",
+        description="给 PI 的可操作建议 (30-80 词)。"
+                    "broken 时给具体重写方向；loose 时给具体措辞改法",
+    )
+
+
 class TournamentMatch(BaseModel):
     """单场 pairwise 比较的 LLM 判定结果"""
     proposal_a_id: str = Field(description="proposal A 的 id（通常用 title）")
@@ -535,6 +608,15 @@ class ResearchProposal(BaseModel):
         default=None,
         description="Feasibility Challenger adversarial 评估，None 表示未跑。"
                     "存在时渲染到 seed.md 的 '⚠️ Feasibility Risks' section。",
+    )
+
+    # ---- R11 Mechanism Alignment Checker（科学合理性 critique）----
+    # 仅 top-1 proposal 跑，仅在 motivation 检测到 cross-domain analogy 时触发
+    mechanism_alignment: MechanismAlignment | None = Field(
+        default=None,
+        description="R11 Mechanism Alignment Checker 评估，None 表示未跑或未触发。"
+                    "存在且 is_cross_domain=True 时渲染到 seed.md 的 "
+                    "'⚠️ Mechanism Alignment' section。",
     )
 
     # ---- Spot-check: 不在 paper_evidence.quantitative_claims 里的可疑数字 ----
