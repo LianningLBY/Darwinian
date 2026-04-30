@@ -43,65 +43,96 @@ from darwinian.utils.llm_retry import invoke_with_retry
 # Prompts
 # ---------------------------------------------------------------------------
 
-_ADVOCATE_PROMPT = """你是科研 idea 的**正方辩护人**。给定一份 ResearchProposal，
-你要论证为什么这个 idea 值得做、能中稿。
+_ADVOCATE_PROMPT = """你是科研 idea 的**正方辩护人**。给定一份 ResearchProposal 和 portfolio
+资源约束，你要论证为什么这个 idea 值得做、能中稿，**同时不能盲目吹捧**。
+
+【6 维度评审框架（必须每条都简短论证，参考 jaywen 外部对抗模板）】
+1. **Motivation 强度**：方向问题真实吗？需求 well-documented 吗？
+2. **Methodological Novelty**：方法/视角真新吗？跟 prior work 区分明确吗？
+3. **Expected Impact**：实验成功后社区会被影响多少？
+4. **Statistical Robustness**：实验设计 sample size / baseline / null control 站得住吗？
+5. **Execution Feasibility (under portfolio constraints)**：能在
+   ≤200 GPU-hours / API ≤$200 / 不要大量人工标注 的硬约束下跑完吗？
+6. **中稿概率**：分 NeurIPS Main Track / D&B Track 分别估计
 
 【任务】
 1. 提炼 3-5 个最强 selling points（含具体数字 / 引用 / mechanism 说明）
 2. 反驳常见质疑（"已有 prior work" / "scope 太宽" / "数据集风险"）
-3. 估计中稿可能性（针对 target_venue，如 NeurIPS/EMNLP）
+3. 给出 Main Track 和 D&B Track 中稿率（不能虚高 — 大部分 idea 即使强也只 15-25%）
 
 【输出严格 JSON】
 {
-  "argument": "300-500 词的辩护陈述，含 selling points + 反驳常见质疑 + 中稿估计",
-  "estimated_acceptance_rate": 0.25,
+  "argument": "400-600 词的辩护陈述，必须按 6 维度逐条简短论证 + 反驳常见质疑",
+  "acceptance_rate_main": 0.15,
+  "acceptance_rate_db": 0.30,
+  "estimated_acceptance_rate": 0.15,
   "key_strengths": ["strength 1 (≤30 词)", "strength 2", ...]
 }
 
-【❗】
-- 不要无脑吹捧。如果 idea 真的弱，acceptance_rate 应低于 0.20
+【❗ Anti-cheerleading】
+- 不要无脑吹捧。如果 idea 真的弱（如 evaluation paper 投 Main Track）main_rate 应 < 0.10
+- 主攻 Main Track，但坦诚承认 — evaluation/benchmark paper 通常 D&B Track 更合适
 - argument 必须引用 proposal 里的具体 phase / metric / mechanism
+- estimated_acceptance_rate = acceptance_rate_main（pipeline 主指标）
 - 不要写 <think>，直接 JSON 开头
 """
 
 
-_CHALLENGER_PROMPT = """你是科研 idea 的**反方挑战者**。给定一份 ResearchProposal
-和正方的 advocate_argument，你要攻击 idea 本身（不是工程可行性 — R9c 已做那个）。
+_CHALLENGER_PROMPT = """你是科研 idea 的**反方挑战者**（devil's advocate）。给定一份
+ResearchProposal 和正方 advocate_argument，你要攻击 idea 本身。
 
-【攻击维度】
-1. **Novelty 真的成立吗** — 提名 2-3 篇可能撞车的真实 prior work（直接给名字 / 方向）
-2. **Methodology 严谨度** — 实验设计 / metric / baseline 选择有没有漏洞
-3. **Contribution 真的 publishable** — 即使技术 OK，故事是不是足够 interesting
-4. **Generalization** — 即使在 specific dataset 上 work，对社区有没有普遍价值
+【辩论规则】
+- **每轮先承认对方说得对的地方**（避免无意义拉锯）
+- 然后逐点反驳，具体到技术细节，不要泛泛而谈
+- **不要重复 R9c 攻击的工程问题**（budget / timeline / data license）— 那是另一个 agent 的事
 
-不要重复 R9c 攻击的工程问题（budget / timeline / data license）。
+【5 维度攻击框架（参考 jaywen 外部对抗模板）】
+1. **Motivation 真问题吗** — 是不是 advocate 编出来的需求？社区真在乎吗？
+2. **Novelty 真成立吗** — 提名 2-3 篇可能撞车的真实 prior work（具名）
+3. **Methodology 严谨度** — 实验设计 / metric / baseline / null control / sample size 漏洞
+4. **Statistical Robustness** — power analysis 站得住吗？n 够大吗？多重比较 correction 做了吗？
+5. **Contribution 真的 publishable** — 故事 fundamental 吗？还是 incremental empirical？
+   - 这是 method paper 还是 evaluation/benchmark paper？投错 venue (Main Track vs D&B) 会 desk reject
 
 【输出严格 JSON】
 {
-  "argument": "300-500 词的反驳陈述，含具体可能撞车的 prior work + methodology 漏洞",
+  "concessions": ["承认 advocate 说得对的 1-2 点 (≤40 词)"],
+  "argument": "400-600 词的反驳陈述，含具体可能撞车的 prior work + methodology 漏洞 + venue mismatch",
   "weaknesses": ["weakness 1 (≤40 词)", "weakness 2", ...],
-  "potential_collisions": ["可能撞车的具体论文名 / 方向 (≤30 词)", ...]
+  "potential_collisions": ["可能撞车的具体论文名 / 方向 (≤30 词)", ...],
+  "venue_mismatch_risk": "如果 idea 是 evaluation paper 投 Main Track，明确指出"
 }
 
 【❗】
-- 不要无脑否定。如果 idea 真的 novel，weaknesses 可以只有 1-2 条
-- 引用具体的 method 名 / dataset 名 / 论文名（没必要的话不要瞎编）
+- 不要无脑否定。如果 idea 真的 novel，weaknesses 可以只 1-2 条
+- 引用具体的 method 名 / dataset 名 / 论文名（不知道就不要瞎编）
+- 必须 concessions ≥1 条（防无脑攻击拉锯）
 - 不要写 <think>，直接 JSON 开头
 """
 
 
 _JUDGE_PROMPT = """你是中立科研 reviewer。已读完 advocate 论证 + challenger 反驳，
-请综合裁决。
+请综合裁决并给出 Go / No-Go / Conditional Go 决策。
 
 【任务】
 1. 列出哪些 challenger 的论点站得住、哪些站不住（指名）
-2. 估计 revised 中稿率（advocate 的 rate × 你的判断 challenger 命中程度）
-3. 给 advocate 下一轮修订建议（actionable，非"加更多实验"这种空泛）
+2. 估计 revised 中稿率（分 Main Track / D&B Track）— 必须比 advocate 保守
+3. 给三档决策 + actionable 修订建议
+
+【三档决策（参考 jaywen 外部对抗模板的 Go/No-Go/Conditional Go）】
+- **go**: 立项进 portfolio，可执行（rate_main ≥ 0.15 且无致命漏洞）
+- **conditional_go**: 按 revisions_proposed 修补后立项（rate_main ≥ 0.10 但有
+  非致命问题，如 venue 错 / scope 砍 / dataset 换）
+- **no_go**: 不进 portfolio（rate_main < 0.10 或有致命漏洞如 idea 本身立不住 /
+  资源 3x 超支 / methodology 伪相关）
 
 【输出严格 JSON】
 {
-  "assessment": "300-500 词裁决说明，逐条评 challenger 论点 + 综合判断",
-  "estimated_acceptance_rate": 0.25,
+  "assessment": "400-600 词裁决说明，逐条评 challenger 论点 + 综合判断",
+  "verdict": "go" | "conditional_go" | "no_go",
+  "acceptance_rate_main": 0.10,
+  "acceptance_rate_db": 0.25,
+  "estimated_acceptance_rate": 0.10,
   "revisions_proposed": [
     "actionable 修订点 1 (≤50 词)",
     "actionable 修订点 2",
@@ -110,9 +141,11 @@ _JUDGE_PROMPT = """你是中立科研 reviewer。已读完 advocate 论证 + cha
 }
 
 【❗】
-- estimated_acceptance_rate 应该比 advocate 给的更**保守**（中位数偏低），
-  因为 reviewer 看 weakness 更敏感
-- revisions_proposed 必须 actionable（如"换 ISCXVPN2016 数据集"），不要"加 more rigor"
+- rate_main 应比 advocate 给的更**保守**（reviewer 对 weakness 更敏感）
+- estimated_acceptance_rate = acceptance_rate_main（pipeline 主指标）
+- revisions 必须 actionable：✅"换 ISCXVPN2016"，❌"加 more rigor"
+- venue 错（evaluation paper 投 Main）→ 默认 conditional_go (revisions=换 D&B)
+  + main rate 低 db rate 高
 - 不要写 <think>，直接 JSON 开头
 """
 
@@ -145,6 +178,7 @@ def debate_proposal(
     """
     rounds: list[DebateRound] = []
     last_revisions: list[str] = []
+    last_verdict: str = "no_go"   # R20: 跟踪最后一轮 verdict
 
     for round_idx in range(1, max_rounds + 1):
         print(f"[debate] Round {round_idx}/{max_rounds} 启动", file=sys.stderr)
@@ -175,15 +209,19 @@ def debate_proposal(
             challenger_argument=challenger_out["argument"][:1500],
             judge_assessment=judge_out["assessment"][:1500],
             estimated_acceptance_rate=judge_out["acceptance_rate"],
+            acceptance_rate_main=judge_out.get("rate_main", judge_out["acceptance_rate"]),
+            acceptance_rate_db=judge_out.get("rate_db", 0.0),
             revisions_proposed=judge_out["revisions"],
         )
         rounds.append(rd)
         print(
-            f"[debate] Round {round_idx} 完成: rate={rd.estimated_acceptance_rate:.2f}, "
+            f"[debate] Round {round_idx} 完成: main={rd.acceptance_rate_main:.2f} / "
+            f"db={rd.acceptance_rate_db:.2f}, verdict={judge_out.get('verdict', '?')}, "
             f"{len(rd.revisions_proposed)} 个修订建议",
             file=sys.stderr,
         )
         last_revisions = rd.revisions_proposed
+        last_verdict = judge_out.get("verdict", "no_go")
 
         # 收敛检测
         if len(rounds) >= 2:
@@ -209,6 +247,9 @@ def debate_proposal(
             acceptance_threshold=acceptance_threshold,
             convergence_delta=convergence_delta,
             converged=False,
+            final_verdict="no_go",
+            final_acceptance_rate_main=0.0,
+            final_acceptance_rate_db=0.0,
         )
 
     final_rate = rounds[-1].estimated_acceptance_rate
@@ -223,6 +264,9 @@ def debate_proposal(
         acceptance_threshold=acceptance_threshold,
         convergence_delta=convergence_delta,
         converged=converged,
+        final_verdict=last_verdict if last_verdict in {"go", "no_go", "conditional_go"} else "no_go",
+        final_acceptance_rate_main=rounds[-1].acceptance_rate_main,
+        final_acceptance_rate_db=rounds[-1].acceptance_rate_db,
     )
 
 
@@ -339,8 +383,20 @@ def _run_judge(
     if not assessment:
         return None
     rate = float(raw.get("estimated_acceptance_rate", 0.0) or 0.0)
+    rate_main = float(raw.get("acceptance_rate_main", rate) or rate)
+    rate_db = float(raw.get("acceptance_rate_db", 0.0) or 0.0)
+    verdict_raw = str(raw.get("verdict", "")).strip().lower()
+    verdict = verdict_raw if verdict_raw in {"go", "no_go", "conditional_go"} else (
+        # 兜底：根据 rate 推断
+        "go" if rate_main >= 0.15
+        else "conditional_go" if rate_main >= 0.10
+        else "no_go"
+    )
     return {
         "assessment": assessment,
+        "verdict": verdict,
+        "rate_main": max(0.0, min(1.0, rate_main)),
+        "rate_db": max(0.0, min(1.0, rate_db)),
         "acceptance_rate": max(0.0, min(1.0, rate)),
         "revisions": [
             str(r).strip()[:300] for r in (raw.get("revisions_proposed") or [])

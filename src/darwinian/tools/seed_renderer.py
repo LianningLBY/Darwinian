@@ -333,24 +333,33 @@ def _render_mechanism_alignment(ma: MechanismAlignment) -> str:
 
 def _render_debate(dr: DebateResult) -> str:
     """
-    渲染 R19 三方辩论结果。
+    渲染 R19/R20 三方辩论结果。
 
-    展示每轮 advocate / challenger / judge 论点 + 中稿率走势 + 最终修订建议。
+    R20: 三档 verdict (go/conditional_go/no_go) + Main / D&B Track 分别 rate
+    + 沿用 R19 多轮 advocate/challenger/judge 论点展示
     """
-    converged_icon = "🟢" if dr.converged else "🔴"
-    parts = ["\n\n## ⚖️ Proposal Debate (R19 advocate vs challenger)\n\n"]
+    verdict_icon = {"go": "🟢", "conditional_go": "🟡", "no_go": "🔴"}.get(
+        dr.final_verdict, "⚪"
+    )
+    parts = ["\n\n## ⚖️ Proposal Debate (R19/R20 advocate vs challenger vs judge)\n\n"]
     parts.append(
-        f"**Final acceptance rate**: {converged_icon} `{dr.final_acceptance_rate:.2f}` "
-        f"(threshold {dr.acceptance_threshold:.2f}, "
-        f"{'converged' if dr.converged else 'not converged'})\n\n"
+        f"**Verdict**: {verdict_icon} `{dr.final_verdict}` "
+        f"({'converged' if dr.converged else 'not converged'})\n\n"
+    )
+    parts.append(
+        f"**NeurIPS Main Track 中稿率**: `{dr.final_acceptance_rate_main:.2f}` | "
+        f"**D&B Track 中稿率**: `{dr.final_acceptance_rate_db:.2f}`\n\n"
     )
     parts.append(f"**Rounds**: {len(dr.rounds)}\n\n")
-    parts.append("**Rate trajectory**: " + " → ".join(
-        f"{r.estimated_acceptance_rate:.2f}" for r in dr.rounds
+    parts.append("**Main Track rate trajectory**: " + " → ".join(
+        f"{r.acceptance_rate_main:.2f}" for r in dr.rounds
     ) + "\n\n")
 
     for r in dr.rounds:
-        parts.append(f"### Round {r.round_number} (rate={r.estimated_acceptance_rate:.2f})\n\n")
+        parts.append(
+            f"### Round {r.round_number} "
+            f"(main={r.acceptance_rate_main:.2f} / db={r.acceptance_rate_db:.2f})\n\n"
+        )
         parts.append("**🟦 Advocate**:\n\n")
         parts.append(f"> {r.advocate_argument}\n\n")
         parts.append("**🟥 Challenger**:\n\n")

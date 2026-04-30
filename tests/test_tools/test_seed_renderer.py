@@ -257,7 +257,9 @@ class TestDebateSection:
                     advocate_argument="Strong novelty due to recall-vs-forecasting framing",
                     challenger_argument="ACD-WFP 2024 may overlap",
                     judge_assessment="ACD-WFP is partial overlap, not full",
-                    estimated_acceptance_rate=0.30,
+                    estimated_acceptance_rate=0.10,
+                    acceptance_rate_main=0.10,
+                    acceptance_rate_db=0.30,
                     revisions_proposed=["use ISCXVPN2016 instead"],
                 ),
                 DebateRound(
@@ -265,14 +267,19 @@ class TestDebateSection:
                     advocate_argument="Refined with ISCXVPN2016",
                     challenger_argument="Still need to address scope",
                     judge_assessment="scope concern partial",
-                    estimated_acceptance_rate=0.32,
+                    estimated_acceptance_rate=0.12,
+                    acceptance_rate_main=0.12,
+                    acceptance_rate_db=0.32,
                     revisions_proposed=["narrow to single primary claim"],
                 ),
             ],
-            final_acceptance_rate=0.32,
+            final_acceptance_rate=0.12,
             acceptance_threshold=0.30,
             convergence_delta=0.05,
-            converged=True,
+            converged=False,
+            final_verdict="conditional_go",
+            final_acceptance_rate_main=0.12,
+            final_acceptance_rate_db=0.32,
         )
 
     def test_no_debate_no_section(self):
@@ -291,9 +298,14 @@ class TestDebateSection:
         p = _minimal_proposal(debate_result=self._dr())
         md = render_proposal(p)
         assert "## ⚖️ Proposal Debate" in md
-        assert "0.32" in md
-        assert "converged" in md
-        assert "0.30 → 0.32" in md
+        # R20: verdict + 双 venue rate
+        assert "conditional_go" in md
+        assert "🟡" in md   # conditional_go icon
+        assert "Main Track" in md
+        assert "D&B Track" in md
+        assert "0.12" in md   # main rate
+        assert "0.32" in md   # db rate
+        assert "0.10 → 0.12" in md   # main rate trajectory
         assert "Round 1" in md
         assert "Round 2" in md
         assert "🟦 Advocate" in md
@@ -309,16 +321,22 @@ class TestDebateSection:
                 DebateRound(
                     round_number=1, advocate_argument="weak",
                     challenger_argument="strong", judge_assessment="weak",
-                    estimated_acceptance_rate=0.10,
+                    estimated_acceptance_rate=0.05,
+                    acceptance_rate_main=0.05,
+                    acceptance_rate_db=0.08,
                 ),
             ],
-            final_acceptance_rate=0.10,
+            final_acceptance_rate=0.05,
             converged=False,
+            final_verdict="no_go",
+            final_acceptance_rate_main=0.05,
+            final_acceptance_rate_db=0.08,
         )
         p = _minimal_proposal(debate_result=dr)
         md = render_proposal(p)
         assert "🔴" in md
         assert "not converged" in md
+        assert "no_go" in md
 
 
 class TestMechanismAlignmentSection:

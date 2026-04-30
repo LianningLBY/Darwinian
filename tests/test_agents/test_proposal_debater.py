@@ -64,10 +64,17 @@ def _chal_response():
     }))
 
 
-def _judge_response(rate=0.25, revisions=None):
+def _judge_response(
+    rate=0.25, revisions=None,
+    verdict="conditional_go", rate_main=None, rate_db=None,
+):
+    """R20: judge response 含 verdict + 双 venue rate"""
     return MagicMock(content=_json.dumps({
         "assessment": "judge sides 50/50, suggests revision.",
         "estimated_acceptance_rate": rate,
+        "verdict": verdict,
+        "acceptance_rate_main": rate_main if rate_main is not None else rate,
+        "acceptance_rate_db": rate_db if rate_db is not None else rate * 1.5,
         "revisions_proposed": revisions or [
             "use ISCXVPN2016 instead of UNSW-NB15",
             "cap to 7B model",
@@ -134,6 +141,47 @@ class TestSingleCalls:
         assert out["acceptance_rate"] == 0.20
         assert len(out["revisions"]) == 2
 
+    # R20-specific
+    def test_judge_extracts_verdict_and_dual_rate(self):
+        """R20: judge 输出 verdict + 双 venue rate"""
+        with patch("darwinian.agents.proposal_debater.invoke_with_retry",
+                   return_value=_judge_response(
+                       rate=0.10, verdict="conditional_go",
+                       rate_main=0.10, rate_db=0.30,
+                   )):
+            out = _run_judge(_proposal(), "adv", "chal", MagicMock())
+        assert out["verdict"] == "conditional_go"
+        assert out["rate_main"] == 0.10
+        assert out["rate_db"] == 0.30
+
+    def test_judge_invalid_verdict_falls_back_by_rate(self):
+        """LLM 给非法 verdict → 按 rate 推断 (≥0.15 → go, ≥0.10 → conditional_go, < → no_go)"""
+        # rate_main=0.20 → 应推 go
+        bad = MagicMock(content=_json.dumps({
+            "assessment": "x", "estimated_acceptance_rate": 0.20,
+            "verdict": "yolo",   # 非法
+            "acceptance_rate_main": 0.20,
+            "acceptance_rate_db": 0.30,
+            "revisions_proposed": [],
+        }))
+        with patch("darwinian.agents.proposal_debater.invoke_with_retry",
+                   return_value=bad):
+            out = _run_judge(_proposal(), "adv", "chal", MagicMock())
+        assert out["verdict"] == "go"
+
+    def test_judge_invalid_verdict_low_rate_no_go(self):
+        bad = MagicMock(content=_json.dumps({
+            "assessment": "x", "estimated_acceptance_rate": 0.05,
+            "verdict": "",   # 缺
+            "acceptance_rate_main": 0.05,
+            "acceptance_rate_db": 0.10,
+            "revisions_proposed": [],
+        }))
+        with patch("darwinian.agents.proposal_debater.invoke_with_retry",
+                   return_value=bad):
+            out = _run_judge(_proposal(), "adv", "chal", MagicMock())
+        assert out["verdict"] == "no_go"
+
 
 # ---------------------------------------------------------------------------
 # debate_proposal end-to-end
@@ -197,6 +245,36 @@ class TestDebateE2E:
         assert result.rounds == []
         assert result.final_acceptance_rate == 0.0
         assert result.converged is False
+
+    def test_r20_verdict_propagates_to_result(self):
+        """R20: judge 给 verdict='conditional_go' → DebateResult.final_verdict='conditional_go'"""
+        side_effects = [
+            _adv_response(rate=0.15),
+            _chal_response(),
+            MagicMock(content=_json.dumps({
+                "assessment": "borderline",
+                "estimated_acceptance_rate": 0.12,
+                "verdict": "conditional_go",
+                "acceptance_rate_main": 0.12,
+                "acceptance_rate_db": 0.30,
+                "revisions_proposed": ["use ISCXVPN2016"],
+            })),
+        ]
+        with patch("darwinian.agents.proposal_debater.invoke_with_retry",
+                   side_effect=side_effects):
+            result = debate_proposal(_proposal(), MagicMock(), max_rounds=1)
+        assert result.final_verdict == "conditional_go"
+        assert result.final_acceptance_rate_main == 0.12
+        assert result.final_acceptance_rate_db == 0.30
+
+    def test_r20_no_rounds_default_no_go(self):
+        """全失败 → final_verdict='no_go'"""
+        with patch("darwinian.agents.proposal_debater.invoke_with_retry",
+                   side_effect=RuntimeError("boom")):
+            result = debate_proposal(_proposal(), MagicMock(), max_rounds=2)
+        assert result.final_verdict == "no_go"
+        assert result.final_acceptance_rate_main == 0.0
+        assert result.final_acceptance_rate_db == 0.0
 
     def test_below_threshold_not_converged(self):
         """rate 稳定但低于 threshold → not converged"""

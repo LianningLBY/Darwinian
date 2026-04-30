@@ -728,7 +728,16 @@ class DebateRound(BaseModel):
     estimated_acceptance_rate: float = Field(
         ge=0.0,
         le=1.0,
-        description="本轮裁决后的中稿概率估计 (0-1)",
+        description="本轮裁决后的中稿概率估计 (0-1, main track 为主)",
+    )
+    # R20: 分 venue 中稿率（用户外部对抗模板的设计）
+    acceptance_rate_main: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="NeurIPS Main Track 中稿率 (0-1)",
+    )
+    acceptance_rate_db: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="NeurIPS D&B Track / EMNLP / 其他 venue 中稿率 (0-1)",
     )
     revisions_proposed: list[str] = Field(
         default_factory=list,
@@ -755,6 +764,20 @@ class DebateResult(BaseModel):
     converged: bool = Field(
         default=False,
         description="True=已收敛且达到门槛，可立项；False=继续辩论或终止",
+    )
+    # R20: 三档 verdict（用户外部对抗模板设计）+ 分 venue 终结率
+    final_verdict: Literal["go", "no_go", "conditional_go"] = Field(
+        default="no_go",
+        description="go=立项可执行；conditional_go=按 revisions 修补后立项；"
+                    "no_go=不进 portfolio。Judge 给的最后一轮裁决",
+    )
+    final_acceptance_rate_main: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="NeurIPS Main Track 最终中稿率（最后一轮 acceptance_rate_main）",
+    )
+    final_acceptance_rate_db: float = Field(
+        default=0.0, ge=0.0, le=1.0,
+        description="D&B Track / 其他 venue 最终中稿率",
     )
     revised_proposal: ResearchProposal | None = Field(
         default=None,
