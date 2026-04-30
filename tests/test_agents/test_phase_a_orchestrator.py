@@ -845,6 +845,100 @@ class TestBuildSeedPool:
         assert pool == []
 
 
+class TestR16FilterSeedsByDirectionSimilarity:
+    """R16: verify 通过的 seed 用 embedding sim 二次过滤跨域论文"""
+
+    def _seed(self, paper_id: str, title: str, abstract: str = "") -> dict:
+        return {
+            "paperId": paper_id, "title": title, "abstract": abstract,
+        }
+
+    def test_drops_low_similarity_seeds(self):
+        """模拟 v3/v5 实测：LLM 列了 NLP 论文当 encrypted traffic seed → sim 低 → 丢"""
+        from darwinian.agents.phase_a_orchestrator import (
+            _filter_seeds_by_direction_similarity,
+        )
+        seeds = [
+            # 同域：abstract 含 encrypted traffic / concept drift
+            self._seed("p1", "DSEC: Drift-oriented Self-evolving Encrypted Traffic Classification",
+                       "We propose DSEC for encrypted traffic classification under "
+                       "concept drift, using streaming statistical detection and "
+                       "incremental model updates"),
+            # 跨域：abstract 是 NLP adversarial training
+            self._seed("p2", "A2T: Adversarial Training for NLP Models",
+                       "We propose adversarial training for natural language "
+                       "understanding tasks, improving robustness on GLUE and "
+                       "SuperGLUE benchmarks"),
+        ]
+
+        # mock embedding：让 direction 的 embedding 跟 DSEC abstract sim 高，跟 A2T abstract sim 低
+        def fake_emb(text: str) -> list[float]:
+            t = text.lower()
+            # 简化：返 3 维向量，[encrypted_traffic_score, nlp_score, neutral]
+            etc_score = 1.0 if ("encrypted traffic" in t or "concept drift" in t) else 0.0
+            nlp_score = 1.0 if ("natural language" in t or "glue" in t) else 0.0
+            return [etc_score, nlp_score, 0.1]
+
+        with patch("darwinian.agents.phase_a_orchestrator.get_text_embedding",
+                   side_effect=fake_emb), \
+             patch("darwinian.agents.phase_a_orchestrator.compute_cosine_similarity",
+                   side_effect=lambda a, b: sum(x*y for x, y in zip(a, b)) / 1.01):
+            kept = _filter_seeds_by_direction_similarity(
+                seeds, "encrypted traffic classification under concept drift",
+                min_sim=0.30,
+            )
+        # DSEC 应保留，A2T 应丢
+        kept_ids = [s["paperId"] for s in kept]
+        assert "p1" in kept_ids
+        assert "p2" not in kept_ids
+
+    def test_short_text_seeds_kept_as_unknown(self):
+        """文本 <30 字符（通常无 abstract，仅 title）→ 保守保留，避免误杀"""
+        from darwinian.agents.phase_a_orchestrator import (
+            _filter_seeds_by_direction_similarity,
+        )
+        seeds = [
+            self._seed("p1", "DSEC", ""),   # 仅 4 字符 title，无 abstract
+            self._seed("p2", "Foo", ""),
+        ]
+        # 不 mock embedding — 短文本路径不应触发计算
+        kept = _filter_seeds_by_direction_similarity(seeds, "encrypted traffic")
+        assert len(kept) == 2
+
+    def test_empty_seeds_returns_empty(self):
+        from darwinian.agents.phase_a_orchestrator import (
+            _filter_seeds_by_direction_similarity,
+        )
+        assert _filter_seeds_by_direction_similarity([], "x") == []
+
+    def test_all_filtered_returns_empty(self):
+        """全部跨域 → 全过滤 → 上游 R15 接管 abort"""
+        from darwinian.agents.phase_a_orchestrator import (
+            _filter_seeds_by_direction_similarity,
+        )
+        seeds = [
+            self._seed("p1", "Pure CLIP NeRF Voxel Grid",
+                       "We propose 3D scene reconstruction using neural radiance "
+                       "fields and CLIP supervision for voxel-grid representations"),
+            self._seed("p2", "ReAL: Multimodal Anomaly Detection",
+                       "We tackle anomaly detection in multimodal video streams "
+                       "using contrastive representation learning"),
+        ]
+
+        # 用零向量 sim → 全部 0
+        def fake_emb(text: str) -> list[float]:
+            return [0.0, 0.0, 0.0]
+
+        with patch("darwinian.agents.phase_a_orchestrator.get_text_embedding",
+                   side_effect=fake_emb), \
+             patch("darwinian.agents.phase_a_orchestrator.compute_cosine_similarity",
+                   return_value=0.0):
+            kept = _filter_seeds_by_direction_similarity(
+                seeds, "encrypted traffic classification", min_sim=0.30,
+            )
+        assert kept == []
+
+
 # ===========================================================================
 # Pri-5: relevance gate
 # ===========================================================================
