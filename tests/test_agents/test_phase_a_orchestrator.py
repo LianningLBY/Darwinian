@@ -588,6 +588,75 @@ class TestLlmListSeedPapers:
                    side_effect=ConnectionError("net")):
             assert _llm_list_seed_papers("x", MagicMock()) == []
 
+    # ---- R14: retry on JSON parse failure ----
+
+    def test_retry_recovers_from_first_failure(self):
+        """v3/v4 LIVE 实测：第一次 <think> 截断 → JSON 解析失败 → 第二次重试拿到结果"""
+        # 第一次返回未闭合 think 块（JSON 解析失败）
+        bad_resp = MagicMock(content="<think>Let me reason...")
+        good_resp = MagicMock(content=_json.dumps({
+            "seed_papers": [
+                {"arxiv_id": "2404.16710", "title": "LayerSkip", "reason": "..."},
+            ],
+        }))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   side_effect=[bad_resp, good_resp]):
+            seeds = _llm_list_seed_papers("x", MagicMock(), max_attempts=3)
+        assert len(seeds) == 1
+        assert seeds[0]["arxiv_id"] == "2404.16710"
+
+    def test_retry_exhausted_returns_empty(self):
+        """3 次都失败 → 返 [], 不 raise"""
+        bad_resp = MagicMock(content="<think>truncated</think>")
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=bad_resp):
+            seeds = _llm_list_seed_papers("x", MagicMock(), max_attempts=3)
+        assert seeds == []
+
+    def test_retry_succeeds_third_attempt(self):
+        bad_resp = MagicMock(content="<think>not json")
+        good_resp = MagicMock(content=_json.dumps({
+            "seed_papers": [{"arxiv_id": "1234.5678", "title": "T"}],
+        }))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   side_effect=[bad_resp, bad_resp, good_resp]):
+            seeds = _llm_list_seed_papers("x", MagicMock(), max_attempts=3)
+        assert len(seeds) == 1
+
+    def test_retry_appends_anti_reasoning_hint_on_retry(self):
+        """重试时 user message 应含'重试 — 上次输出被截断'提示"""
+        bad_resp = MagicMock(content="not json")
+        good_resp = MagicMock(content=_json.dumps({
+            "seed_papers": [{"arxiv_id": "x.y", "title": "t"}],
+        }))
+        captured_messages = []
+
+        def fake_invoke(llm, msgs):
+            captured_messages.append(msgs)
+            if len(captured_messages) == 1:
+                return bad_resp
+            return good_resp
+
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   side_effect=fake_invoke):
+            _llm_list_seed_papers("test direction", MagicMock(), max_attempts=3)
+        # 第二次 call 的 user message 应含重试提示
+        second_human_content = captured_messages[1][1].content
+        assert "重试" in second_human_content
+        assert "<think>" in second_human_content   # 提到 <think> 块的警告
+        assert "`{`" in second_human_content   # 提示直接以 { 开头
+
+    def test_empty_seed_papers_treated_as_failure_and_retried(self):
+        """LLM 返合法 JSON 但 seed_papers 为空 → 应触发 retry"""
+        empty_resp = MagicMock(content=_json.dumps({"seed_papers": []}))
+        good_resp = MagicMock(content=_json.dumps({
+            "seed_papers": [{"arxiv_id": "1.2", "title": "t"}],
+        }))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   side_effect=[empty_resp, good_resp]):
+            seeds = _llm_list_seed_papers("x", MagicMock(), max_attempts=3)
+        assert len(seeds) == 1
+
 
 class TestVerifyAndRecoverSeed:
     def test_arxiv_id_direct_hit(self):
