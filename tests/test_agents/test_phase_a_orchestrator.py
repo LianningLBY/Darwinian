@@ -785,8 +785,11 @@ class TestRerankByDirectionRelevance:
 
 
 class TestBuildSeedPool:
-    def test_full_pipeline(self):
-        """build_seed_pool 端到端：mock 4 个内部依赖"""
+    def test_full_pipeline(self, monkeypatch):
+        """build_seed_pool paper 策略端到端：mock 4 个内部依赖。
+        R17: 默认改为 keyword 策略，本测试显式走 paper 策略（旧路径仍要 work）。
+        """
+        monkeypatch.setenv("DARWINIAN_SEED_STRATEGY", "paper")
         # mock LLM 列 2 个 seed
         fake_resp = MagicMock(content=_json.dumps({
             "seed_papers": [
@@ -824,8 +827,9 @@ class TestBuildSeedPool:
         ids = {p["paperId"] for p in pool}
         assert ids == {"S2_LS", "S2_DEL", "REF1", "REF2"}
 
-    def test_empty_when_no_seeds_verified(self):
-        """LLM 列 seed 但 S2 全 verify 失败"""
+    def test_empty_when_no_seeds_verified(self, monkeypatch):
+        """paper 策略：LLM 列 seed 但 S2 全 verify 失败"""
+        monkeypatch.setenv("DARWINIAN_SEED_STRATEGY", "paper")
         fake_resp = MagicMock(content=_json.dumps({
             "seed_papers": [{"arxiv_id": "fake.id", "title": "fake"}]
         }))
@@ -838,11 +842,134 @@ class TestBuildSeedPool:
             pool = build_seed_pool("x", MagicMock())
         assert pool == []
 
-    def test_llm_failure_returns_empty(self):
+    def test_llm_failure_returns_empty(self, monkeypatch):
+        """paper 策略：LLM 完全挂"""
+        monkeypatch.setenv("DARWINIAN_SEED_STRATEGY", "paper")
         with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
                    side_effect=ConnectionError("net")):
             pool = build_seed_pool("x", MagicMock())
         assert pool == []
+
+
+class TestR17KeywordStrategy:
+    """R17: 默认 keyword 策略 — LLM 列 search queries → S2 search → 合并去重 → rerank"""
+
+    def test_default_strategy_is_keyword(self, monkeypatch):
+        """env var 不设 → 默认走 keyword 策略，不调 _verify_and_recover_seed"""
+        monkeypatch.delenv("DARWINIAN_SEED_STRATEGY", raising=False)
+        # mock LLM 返 queries
+        fake_resp = MagicMock(content=_json.dumps({
+            "queries": [
+                "encrypted traffic concept drift",
+                "website fingerprinting domain adaptation",
+            ]
+        }))
+        # mock S2 search 各返一些论文
+        def fake_search(q, limit=15):
+            return [
+                {"paperId": f"P_{q.split()[0]}_1", "title": f"Paper for {q[:30]}",
+                 "abstract": f"abstract about {q}"},
+            ]
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp), \
+             patch("darwinian.agents.phase_a_orchestrator.search_papers",
+                   side_effect=fake_search), \
+             patch("darwinian.agents.phase_a_orchestrator.get_references",
+                   return_value=[]), \
+             patch("darwinian.agents.phase_a_orchestrator.get_citations",
+                   return_value=[]), \
+             patch("darwinian.agents.phase_a_orchestrator._filter_seeds_by_direction_similarity",
+                   side_effect=lambda seeds, direction, **kw: seeds):
+            pool = build_seed_pool("encrypted traffic", MagicMock())
+        # 应有 2 篇（每个 query 各 1）
+        assert len(pool) == 2
+        ids = {p["paperId"] for p in pool}
+        assert "P_encrypted_1" in ids
+        assert "P_website_1" in ids
+
+    def test_keyword_strategy_dedups_across_queries(self, monkeypatch):
+        """同 paperId 在多个 query 中出现 → 去重"""
+        monkeypatch.delenv("DARWINIAN_SEED_STRATEGY", raising=False)
+        fake_resp = MagicMock(content=_json.dumps({
+            "queries": ["query one", "query two"],
+        }))
+
+        # 两个 query 都返同一篇 paper
+        def fake_search(q, limit=15):
+            return [{"paperId": "DUP", "title": "Dup paper",
+                     "abstract": "x"}]
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp), \
+             patch("darwinian.agents.phase_a_orchestrator.search_papers",
+                   side_effect=fake_search), \
+             patch("darwinian.agents.phase_a_orchestrator.get_references",
+                   return_value=[]), \
+             patch("darwinian.agents.phase_a_orchestrator.get_citations",
+                   return_value=[]), \
+             patch("darwinian.agents.phase_a_orchestrator._filter_seeds_by_direction_similarity",
+                   side_effect=lambda seeds, direction, **kw: seeds):
+            pool = build_seed_pool("dir", MagicMock())
+        ids = [p["paperId"] for p in pool]
+        assert ids.count("DUP") == 1
+
+    def test_keyword_strategy_empty_queries_returns_empty(self, monkeypatch):
+        """LLM 返空 queries → seed_pool=[]，让 R15 接管 abort"""
+        monkeypatch.delenv("DARWINIAN_SEED_STRATEGY", raising=False)
+        fake_resp = MagicMock(content=_json.dumps({"queries": []}))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp):
+            pool = build_seed_pool("dir", MagicMock())
+        assert pool == []
+
+    def test_keyword_strategy_filters_short_queries(self, monkeypatch):
+        """LLM 返单 token query → 过滤（避免 'classification' 这种太泛的）"""
+        from darwinian.agents.phase_a_orchestrator import _llm_list_search_keywords
+        monkeypatch.delenv("DARWINIAN_SEED_STRATEGY", raising=False)
+        # query 列表混合：合法 + 单 token + 空字符串
+        fake_resp = MagicMock(content=_json.dumps({
+            "queries": [
+                "encrypted traffic drift",   # ✓ 3 tokens
+                "classification",             # ✗ 1 token
+                "",                           # ✗ 空
+                "  ",                         # ✗ 空白
+                "website fingerprinting",     # ✓ 2 tokens
+            ]
+        }))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp):
+            queries = _llm_list_search_keywords("dir", MagicMock())
+        assert queries == ["encrypted traffic drift", "website fingerprinting"]
+
+    def test_keyword_retry_on_parse_failure(self, monkeypatch):
+        """LLM 第 1 次返非 JSON, 第 2 次 OK"""
+        from darwinian.agents.phase_a_orchestrator import _llm_list_search_keywords
+        monkeypatch.delenv("DARWINIAN_SEED_STRATEGY", raising=False)
+        bad = MagicMock(content="<think>thinking...")
+        good = MagicMock(content=_json.dumps({"queries": ["a b c"]}))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   side_effect=[bad, good]):
+            queries = _llm_list_search_keywords("dir", MagicMock(), max_attempts=3)
+        assert queries == ["a b c"]
+
+    def test_paper_strategy_opt_in_via_env(self, monkeypatch):
+        """env DARWINIAN_SEED_STRATEGY=paper 走旧路径（验证 opt-in 仍然 work）"""
+        monkeypatch.setenv("DARWINIAN_SEED_STRATEGY", "paper")
+        fake_resp = MagicMock(content=_json.dumps({
+            "seed_papers": [{"arxiv_id": "2404.16710", "title": "LayerSkip"}]
+        }))
+        with patch("darwinian.agents.phase_a_orchestrator.invoke_with_retry",
+                   return_value=fake_resp), \
+             patch("darwinian.agents.phase_a_orchestrator.get_paper_details",
+                   return_value={"paperId": "P1", "title": "LayerSkip",
+                                 "abstract": "x"}), \
+             patch("darwinian.agents.phase_a_orchestrator.get_references",
+                   return_value=[]), \
+             patch("darwinian.agents.phase_a_orchestrator.get_citations",
+                   return_value=[]), \
+             patch("darwinian.agents.phase_a_orchestrator._filter_seeds_by_direction_similarity",
+                   side_effect=lambda seeds, direction, **kw: seeds):
+            pool = build_seed_pool("dir", MagicMock(), n_seeds=1)
+        assert len(pool) >= 1
 
 
 class TestR16FilterSeedsByDirectionSimilarity:

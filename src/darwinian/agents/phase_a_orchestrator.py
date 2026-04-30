@@ -72,6 +72,42 @@ class PhaseAAbortError(RuntimeError):
 # 替换 S2 keyword search 路径，从根上解决 candidate pool 缺方向论文的问题
 # ===========================================================================
 
+_LLM_KEYWORDS_PROMPT = """你是科研助理。给定一个研究方向，**不要列论文**（v6 LIVE 实测 LLM 大量
+编造不存在的 arxiv_id：列了 "EncT/ConAda/AdaETC" 等貌似合理的名字，但 arxiv_id 解析到
+水下图像/数学/医学论文上）。改为列出 **5-7 组高质量 S2 搜索关键词**，让 S2 真实检索召回。
+
+输出严格 JSON：
+{
+  "queries": [
+    "encrypted traffic classification concept drift",
+    "website fingerprinting domain adaptation tor",
+    "network traffic incremental learning drift detection",
+    "ET-BERT network traffic transformer",
+    "FlowPrint AppScanner mobile encrypted traffic"
+  ]
+}
+
+【设计原则】
+1. 每个 query 是 multi-token search query（3-7 词），不是单个 broad 词
+2. queries 互补不冗余——覆盖方向不同子赛道 / 不同方法谱系
+3. **领域关键词 + 方法关键词组合**：
+   * 方向 = "encrypted traffic classification under concept drift"
+     ✅ "encrypted traffic concept drift detection"
+     ✅ "website fingerprinting domain adaptation"
+     ✅ "ET-BERT network traffic transformer"
+     ❌ "machine learning"（太泛）
+     ❌ "concept drift"（不带应用领域）
+4. 优先用**论文标题里实际会出现的术语**
+5. 可加方法名 / 系统名（如 "ET-BERT"/"FlowPrint"/"DSEC"）让 S2 精确召回
+
+输出严格 JSON，不要 markdown 包裹。
+
+【❗ 输出节流】
+- 不要写 <think> 块，不要 reasoning
+- 第一个 token 就开始 `{`
+"""
+
+
 _LLM_SEED_PROMPT = """你是科研助理。给定一个研究方向，列出该方向**最重要**的 8-15 篇论文 seed
 （必须是真实存在的、已发表/arxiv 可查的论文），每篇含 arxiv_id + 完整 title + 一句话理由。
 
@@ -142,21 +178,159 @@ def build_seed_pool(
     final_pool_size: int = 50,
 ) -> list[dict]:
     """
-    Scheme X 主入口。返回 list of S2-style paper dict（含 paperId/title/abstract/year/
-    citationCount/externalIds），可直接喂给 build_concept_graph(seed_pool=...)。
+    Scheme X 主入口。返回 list of S2-style paper dict。
 
-    流程：
-      1. LLM 列 N 个 seed (arxiv_id + title + reason)
-      2. 对每个 seed：先 S2 verify by arxiv_id；失败则用 title fuzzy match 回捞
-      3. 对验证通过的 seeds：调 get_references / get_citations 一跳扩展
-      4. 按 (is_seed, direction relevance, citation) 重排，取 top-K
+    R17 重构：默认走 **keyword search 策略**（v6 LIVE 实测 LLM 大量编造 arxiv_id：
+    LLM 列了 15 个看起来真的 encrypted traffic 论文 title，但 arxiv_id 实际指向
+    水下图像/数学/医学论文。"paper 策略" 完全不可靠）。改成让 LLM 列 keywords
+    → S2 search 拉真实存在的论文，绕过 LLM 论文编造问题。
+
+    env DARWINIAN_SEED_STRATEGY:
+      "keyword" (默认) = LLM 列 search queries → S2 search
+      "paper"  = LLM 列论文 (旧策略，保留作 fallback / 调试用)
     """
-    # Step 1: LLM 列 seed 候选
+    strategy = os.environ.get("DARWINIAN_SEED_STRATEGY", "keyword").lower()
+    if strategy == "paper":
+        return _build_seed_pool_paper_strategy(
+            direction, llm, n_seeds=n_seeds, refs_per_seed=refs_per_seed,
+            cits_per_seed=cits_per_seed, final_pool_size=final_pool_size,
+        )
+    # default: keyword strategy
+    return _build_seed_pool_keyword_strategy(
+        direction, llm,
+        refs_per_seed=refs_per_seed, cits_per_seed=cits_per_seed,
+        final_pool_size=final_pool_size,
+    )
+
+
+def _build_seed_pool_keyword_strategy(
+    direction: str,
+    llm: BaseChatModel,
+    *,
+    refs_per_seed: int = 8,
+    cits_per_seed: int = 8,
+    final_pool_size: int = 50,
+    per_query_limit: int = 15,
+) -> list[dict]:
+    """
+    R17 keyword 策略：LLM 列 5-7 组 search queries → S2 search → 合并去重 → rerank。
+
+    优点：所有 paper 都是 S2 上真实存在的，避免 LLM 编造 arxiv_id 的问题。
+    """
+    queries = _llm_list_search_keywords(direction, llm)
+    print(f"[seed_pool] LLM 列出 {len(queries)} 组 search queries", file=sys.stderr)
+    for i, q in enumerate(queries, 1):
+        print(f"[seed_pool]   Q{i}: {q}", file=sys.stderr)
+
+    if not queries:
+        return []
+
+    # S2 search 每条 query
+    seen_ids: set = set()
+    seeds: list[dict] = []
+    for q in queries:
+        try:
+            results = search_papers(q, limit=per_query_limit)
+        except Exception as e:
+            print(f"[seed_pool] search '{q}' 失败: {type(e).__name__}", file=sys.stderr)
+            continue
+        added = 0
+        for r in results:
+            pid = r.get("paperId")
+            if not pid or pid in seen_ids:
+                continue
+            seen_ids.add(pid)
+            seeds.append(r)
+            added += 1
+        print(f"[seed_pool]   Q{queries.index(q)+1} 新增 {added} 篇 "
+              f"(累计 {len(seeds)})", file=sys.stderr)
+
+    if not seeds:
+        return []
+
+    # R16 sim 过滤（防止 keyword 太泛拉到不相关）
+    seeds = _filter_seeds_by_direction_similarity(seeds, direction)
+    print(f"[seed_pool] sim 过滤后剩 {len(seeds)} 篇", file=sys.stderr)
+    if not seeds:
+        return []
+
+    # 一跳扩展 + rerank（沿用 paper 策略的下半截）
+    expanded = _expand_seeds_one_hop(seeds, refs_per_seed, cits_per_seed)
+    print(f"[seed_pool] 一跳扩展后候选池 {len(expanded)} 篇", file=sys.stderr)
+    seed_ids = {s.get("paperId", "") for s in seeds if s.get("paperId")}
+    ranked = _rerank_by_direction_relevance(expanded, direction, seed_ids)
+    return ranked[:final_pool_size]
+
+
+def _llm_list_search_keywords(
+    direction: str,
+    llm: BaseChatModel,
+    *,
+    max_attempts: int = 3,
+) -> list[str]:
+    """
+    R17: 让 LLM 列 5-7 组 S2 search queries。复用 R14 的 retry + anti-reasoning。
+    """
+    base_human = (
+        f"研究方向：{direction}\n\n"
+        f"请列 5-7 组高质量 S2 搜索关键词。"
+    )
+    last_err = ""
+    for attempt in range(1, max_attempts + 1):
+        human_msg = base_human
+        if attempt > 1:
+            human_msg += (
+                "\n\n【重试 — 上次输出无法解析】"
+                "**直接以 `{` 开头**，不要 <think> 块或 reasoning。"
+            )
+        try:
+            response = invoke_with_retry(llm, [
+                SystemMessage(content=_LLM_KEYWORDS_PROMPT),
+                HumanMessage(content=human_msg),
+            ])
+            raw = parse_llm_json(response.content)
+            queries = raw.get("queries") or []
+            valid = [
+                q.strip() for q in queries
+                if isinstance(q, str) and q.strip() and len(q.split()) >= 2
+            ]
+            if valid:
+                if attempt > 1:
+                    print(
+                        f"[seed_pool] _llm_list_search_keywords 第 {attempt}/{max_attempts} "
+                        f"次重试成功，{len(valid)} 个 query",
+                        file=sys.stderr,
+                    )
+                return valid
+            last_err = "queries 为空或 token 数 <2"
+        except Exception as e:
+            last_err = f"{type(e).__name__}: {str(e)[:200]}"
+        print(
+            f"[seed_pool] _llm_list_search_keywords 第 {attempt}/{max_attempts} 次失败: "
+            f"{last_err}",
+            file=sys.stderr,
+        )
+    return []
+
+
+def _build_seed_pool_paper_strategy(
+    direction: str,
+    llm: BaseChatModel,
+    *,
+    n_seeds: int = 15,
+    refs_per_seed: int = 8,
+    cits_per_seed: int = 8,
+    final_pool_size: int = 50,
+) -> list[dict]:
+    """
+    旧 paper 策略：LLM 列 15 篇论文 (arxiv_id + title) → verify by arxiv_id → 一跳 → rerank。
+
+    v6 LIVE 实测：LLM 大量编造 arxiv_id (列了真的 encrypted traffic title 但
+    arxiv_id 解析到水下图像/数学/医学论文上)。R17 已默认改用 keyword 策略，
+    本函数保留供 env DARWINIAN_SEED_STRATEGY=paper 调试 / 对照用。
+    """
     candidates = _llm_list_seed_papers(direction, llm, n=n_seeds)
     print(f"[seed_pool] LLM 列出 {len(candidates)} 个 seed 候选", file=sys.stderr)
-    # R16: 把 LLM 列出的 seed titles dump 到 stderr，方便诊断"召回偏差"
-    # （之前 v3/v5 实测发现 LLM 把 NLP/Vision 通用论文当 encrypted traffic seed,
-    # 但日志只 print 数量看不到内容）
     for i, c in enumerate(candidates[:20], 1):
         print(
             f"[seed_pool]   #{i:2d} arxiv:{c.get('arxiv_id', '?')} | "
@@ -164,7 +338,6 @@ def build_seed_pool(
             file=sys.stderr,
         )
 
-    # Step 2: verify + recover
     seeds: list[dict] = []
     for cand in candidates:
         paper = _verify_and_recover_seed(cand)
