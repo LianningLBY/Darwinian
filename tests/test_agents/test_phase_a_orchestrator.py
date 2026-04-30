@@ -326,8 +326,10 @@ class TestBuildMaterialPack:
             "hot_2024_2026": ["arxiv:2404.16710", "arxiv:2510.del"]
         }
 
-    def test_top_k_truncation(self):
+    def test_top_k_truncation(self, monkeypatch):
         """top_k_evidence 截断按 citation_count 排序"""
+        # R15: 测试构造的是 0 evidence + 0 phenomena，需绕过默认硬熔断
+        monkeypatch.setenv("DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE", "1")
         mock_papers = [
             _mk_paper(f"P{i}", year=2024, citations=100 - i)
             for i in range(20)
@@ -354,8 +356,10 @@ class TestBuildMaterialPack:
         assert papers_arg[0]["paper_id"] == "s2:P0"
         assert papers_arg[4]["paper_id"] == "s2:P4"
 
-    def test_empty_graph_still_returns_valid_pack(self):
+    def test_empty_graph_still_returns_valid_pack(self, monkeypatch):
         """build_concept_graph 返空（如 S2 全挂）时 orchestrator 不崩"""
+        # R15: 测试构造的是 0 evidence + 0 phenomena，需绕过默认硬熔断
+        monkeypatch.setenv("DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE", "1")
         empty_graph = ConceptGraph()
         with patch("darwinian.agents.phase_a_orchestrator.build_seed_pool",
                    return_value=[]), \
@@ -1037,3 +1041,137 @@ class TestPhaseAHardAbort:
         msg = str(e)
         assert "换" in msg or "sub-direction" in msg
         assert "DARWINIAN_PHASE_A_HARD_ABORT_MIN=0" in msg
+
+
+class TestPhaseAZeroEvidenceAbort:
+    """R15: 0 真相关 + 0 phenomena 的默认硬熔断（不需 env var）
+
+    通过 mock build_concept_graph / batch_extract_evidence /
+    batch_mine_phenomena 让 Phase A 走完到 R15 检查点，验证 raise 行为。
+    """
+
+    def _setup_mocks(self, monkeypatch, *, phenomena, evidence_relations):
+        """让 Phase A 跑通到 R15 检查点，evidence_relations 控制 truly_relevant 数"""
+        from darwinian.agents import phase_a_orchestrator as orch
+        from darwinian.state import (
+            ConceptGraph, PaperEvidence, PaperInfo,
+            QuantitativeClaim, ResearchConstraints,
+        )
+
+        # 一组 fake papers + evidence
+        n_papers = max(len(evidence_relations), 1)
+        papers = [PaperInfo(
+            paper_id=f"p{i}", title=f"P{i}", abstract="abs", year=2024,
+            citation_count=10,
+        ) for i in range(n_papers)]
+        graph = ConceptGraph(papers=papers, entities=[], limitations=[],
+                             novel_pair_hints=[])
+
+        evidence_list = [PaperEvidence(
+            paper_id=f"p{i}", title=f"P{i}", short_name=f"P{i}",
+            quantitative_claims=[QuantitativeClaim(
+                metric_name="x", metric_value="1x")],
+            headline_result="x", relation_to_direction=rel,
+        ) for i, rel in enumerate(evidence_relations)]
+
+        # mock 各个外部依赖
+        monkeypatch.setattr(orch, "build_seed_pool",
+                            lambda *a, **k: [{"paperId": p.paper_id} for p in papers])
+        monkeypatch.setattr(orch, "build_concept_graph",
+                            lambda *a, **k: graph)
+        monkeypatch.setattr(orch, "write_structural_hole_hooks",
+                            lambda *a, **k: [])
+        monkeypatch.setattr(orch, "_resolve_arxiv_ids",
+                            lambda papers: {p.paper_id: "" for p in papers})
+        monkeypatch.setattr(orch, "_select_top_papers_by_relevance",
+                            lambda graph, k: papers[:k])
+        monkeypatch.setattr(orch, "batch_extract_evidence",
+                            lambda *a, **k: evidence_list)
+        monkeypatch.setattr(orch, "batch_mine_phenomena",
+                            lambda *a, **k: phenomena)
+        monkeypatch.setattr(orch, "detect_cross_paper_contradictions",
+                            lambda evs: [])
+        monkeypatch.setattr(orch, "_bucket_by_year",
+                            lambda *a, **k: {})
+
+    def test_aborts_on_zero_truly_relevant_zero_phenomena(self, monkeypatch):
+        """v3/v4/v5 实战 case：0 真相关 + 0 phenomena → 默认 raise"""
+        from darwinian.agents.phase_a_orchestrator import (
+            PhaseAAbortError, build_research_material_pack,
+        )
+        from darwinian.state import ResearchConstraints
+
+        monkeypatch.delenv("DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE", raising=False)
+        monkeypatch.delenv("DARWINIAN_PHASE_A_HARD_ABORT_MIN", raising=False)
+        # 全 orthogonal → truly_relevant=0；phenomena=[] → 总和 0
+        self._setup_mocks(monkeypatch,
+                          phenomena=[],
+                          evidence_relations=["orthogonal"] * 3)
+        with pytest.raises(PhaseAAbortError) as exc_info:
+            build_research_material_pack(
+                direction="x", constraints=ResearchConstraints(),
+                extractor_llm=MagicMock(), evidence_llm=MagicMock(),
+                top_k_evidence=3,
+            )
+        msg = str(exc_info.value)
+        assert "0 篇真相关" in msg
+        assert "0 个 phenomena" in msg
+        assert "DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE=1" in msg
+
+    def test_does_not_abort_when_phenomena_present(self, monkeypatch):
+        """0 真相关但有 phenomena → 不 abort（phenomena 是另一种科学依据）"""
+        from darwinian.agents.phase_a_orchestrator import build_research_material_pack
+        from darwinian.state import Phenomenon, ResearchConstraints
+
+        monkeypatch.delenv("DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE", raising=False)
+        monkeypatch.delenv("DARWINIAN_PHASE_A_HARD_ABORT_MIN", raising=False)
+        ph = Phenomenon(
+            type="surprising_result",
+            description="x", supporting_quote="q", paper_ids=["p0"],
+        )
+        self._setup_mocks(monkeypatch,
+                          phenomena=[ph],
+                          evidence_relations=["orthogonal"] * 3)
+        # 不应 raise
+        pack = build_research_material_pack(
+            direction="x", constraints=ResearchConstraints(),
+            extractor_llm=MagicMock(), evidence_llm=MagicMock(),
+            top_k_evidence=3,
+        )
+        assert pack is not None
+        assert len(pack.phenomena) == 1
+
+    def test_does_not_abort_when_truly_relevant_present(self, monkeypatch):
+        """有真相关论文（即使 0 phenomena）→ 不 abort"""
+        from darwinian.agents.phase_a_orchestrator import build_research_material_pack
+        from darwinian.state import ResearchConstraints
+
+        monkeypatch.delenv("DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE", raising=False)
+        monkeypatch.delenv("DARWINIAN_PHASE_A_HARD_ABORT_MIN", raising=False)
+        self._setup_mocks(monkeypatch,
+                          phenomena=[],
+                          evidence_relations=["extends", "baseline", "extends"])
+        pack = build_research_material_pack(
+            direction="x", constraints=ResearchConstraints(),
+            extractor_llm=MagicMock(), evidence_llm=MagicMock(),
+            top_k_evidence=3,
+        )
+        assert pack is not None
+
+    def test_env_var_allow_disables_abort(self, monkeypatch):
+        """env DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE=1 时即使 0+0 也不 abort"""
+        from darwinian.agents.phase_a_orchestrator import build_research_material_pack
+        from darwinian.state import ResearchConstraints
+
+        monkeypatch.setenv("DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE", "1")
+        monkeypatch.delenv("DARWINIAN_PHASE_A_HARD_ABORT_MIN", raising=False)
+        self._setup_mocks(monkeypatch,
+                          phenomena=[],
+                          evidence_relations=["orthogonal"] * 3)
+        # 不应 raise（env 关闭了熔断）
+        pack = build_research_material_pack(
+            direction="x", constraints=ResearchConstraints(),
+            extractor_llm=MagicMock(), evidence_llm=MagicMock(),
+            top_k_evidence=3,
+        )
+        assert pack is not None

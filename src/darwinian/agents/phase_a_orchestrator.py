@@ -454,6 +454,19 @@ def build_research_material_pack(
         )
         phenomena.extend(contradictions)
 
+    # ---- R15: 默认硬熔断 — 0 真相关 + 0 phenomena = 没有任何科学依据可写 ----
+    # v3/v4/v5 三次实战证明这种 case 下 elaborator 一定硬拗 orthogonal 论文。
+    # 跟 R12（env var opt-in）不同，这是默认开启的"绝对极端 case"防御。
+    # env var DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE=1 可关闭（debug / 测试 / 渲染验证）
+    allow_zero = os.environ.get("DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE", "0") == "1"
+    if not allow_zero and n_truly == 0 and len(phenomena) == 0:
+        raise PhaseAAbortError(
+            f"Phase A 硬熔断：0 篇真相关论文 + 0 个 phenomena（绝对没有科学依据可写）。"
+            f"这种 case 下 elaborator 一定硬拗 orthogonal 兜底论文产出 hand-waved seed。"
+            f"建议换更聚焦的 sub-direction，让 Phase A 拉到真相关论文。如要绕过此熔断"
+            f"（仅 debug / 渲染测试用），set DARWINIAN_PHASE_A_ALLOW_ZERO_EVIDENCE=1。"
+        )
+
     # ---- Step 5: timeline_signals ----
     timeline = _bucket_by_year(top_papers, arxiv_id_by_paperid)
 
