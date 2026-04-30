@@ -68,15 +68,23 @@ def main() -> None:
     )
 
     # ---- Phase A ----
-    from darwinian.agents.phase_a_orchestrator import build_research_material_pack
-    print("[auto_seed] Phase A 启动 —— 这步可能要 5-15 分钟（看论文数量）", file=sys.stderr)
-    pack = build_research_material_pack(
-        direction=direction,
-        constraints=constraints,
-        extractor_llm=extractor_llm,
-        evidence_llm=evidence_llm,
-        top_k_evidence=8,    # 实测先取 8 篇，不至于太久
+    from darwinian.agents.phase_a_orchestrator import (
+        PhaseAAbortError,
+        build_research_material_pack,
     )
+    print("[auto_seed] Phase A 启动 —— 这步可能要 5-15 分钟（看论文数量）", file=sys.stderr)
+    try:
+        pack = build_research_material_pack(
+            direction=direction,
+            constraints=constraints,
+            extractor_llm=extractor_llm,
+            evidence_llm=evidence_llm,
+            top_k_evidence=8,    # 实测先取 8 篇，不至于太久
+        )
+    except PhaseAAbortError as e:
+        # R12: 真相关论文不足，hard abort，省下游 ~80 LLM call 的钱
+        print(f"# 错误：Phase A 主动终止\n# {e}", file=sys.stderr)
+        sys.exit(4)
     print(f"[auto_seed] Phase A 完成: {len(pack.paper_evidence)} 篇 PaperEvidence", file=sys.stderr)
 
     if not pack.paper_evidence:

@@ -55,9 +55,8 @@ _VALID_DIMENSIONS = {
 _VALID_DIM_VERDICTS = {"aligned", "loose", "broken"}
 _VALID_OVERALL = {"aligned", "loose_analogy", "hand_waved", "not_applicable"}
 
-# 探测 cross-domain 类比的关键词（中英混合，因为 elaborator 可能任一）
-# 命中任一即触发 LLM check（false positive 也只是浪费 1 次 ¥0.05 LLM call）
-_CROSS_DOMAIN_PATTERNS = [
+# R13: 显式类比关键词（明显的"我借了别人的东西"措辞）
+_EXPLICIT_PATTERNS = [
     re.compile(r"\binspired by\b", re.IGNORECASE),
     # derive / derived / deriving from（动词时态全覆盖）
     re.compile(r"\bderiv(?:e|ed|es|ing) .{0,80}\bfrom\b", re.IGNORECASE),
@@ -71,6 +70,34 @@ _CROSS_DOMAIN_PATTERNS = [
     # 中文：'借鉴' / '启发' (含'受X启发'/'X启发的') / '类比' / '跨域' / '跨学科'
     re.compile(r"借鉴|启发|类比|跨域|跨学科"),
 ]
+
+# R13: 隐式类比关键词（v3 LIVE 实测漏抓的措辞，elaborator 用"face similar
+# capacity-dependent vulnerabilities"暗示 USM 语音机制 transfer 到加密流量，
+# 没用 "inspired by"，pre-filter 漏抓 → R9c 才发现。这些 pattern 抓"暗示 transfer"）
+_IMPLICIT_PATTERNS = [
+    # "face/exhibit/show similar X" — 隐含 mechanism transfer
+    re.compile(r"\b(?:face|exhibit|show|display|suffer)s?\s+similar\b", re.IGNORECASE),
+    # "the same mechanism applies"
+    re.compile(r"\bthe same\s+\w+\s+(?:applies|holds|appears|emerges|persists)\b", re.IGNORECASE),
+    # "parallel observation / analogous behavior"
+    re.compile(r"\bparallel\s+(?:observation|behavior|finding|result)s?\b", re.IGNORECASE),
+    re.compile(r"\banalogous\s+(?:behavior|mechanism|effect|phenomenon)\b", re.IGNORECASE),
+    # "as shown in [arxiv/citation], we hypothesize"
+    re.compile(
+        r"\bas\s+(?:shown|demonstrated|observed|reported)\s+in\b.{0,60}"
+        r"\bwe\s+(?:hypothesize|expect|conjecture|posit|argue|predict)",
+        re.IGNORECASE,
+    ),
+    # "we hypothesize ... similar"
+    re.compile(
+        r"\bwe\s+(?:hypothesize|expect|conjecture|posit|argue)\s+.{0,40}\bsimilar\b",
+        re.IGNORECASE,
+    ),
+    # 中文隐式
+    re.compile(r"同样的机制|相同的(?:机制|规律)|平行(?:观察|现象)"),
+]
+
+_CROSS_DOMAIN_PATTERNS = _EXPLICIT_PATTERNS + _IMPLICIT_PATTERNS
 
 
 def _detect_cross_domain(motivation: str, proposed_method: str = "") -> bool:
@@ -163,31 +190,37 @@ def check_mechanism_alignment(
     proposal: ResearchProposal,
     llm: BaseChatModel,
     *,
-    skip_if_no_cross_domain_keyword: bool = True,
+    skip_if_no_cross_domain_keyword: bool = False,
 ) -> MechanismAlignment | None:
     """
     对 single proposal 跑 mechanism alignment critique。
 
+    R13 fix: 默认改为 always-run LLM（之前 v3 LIVE 实测 pre-filter 漏抓
+    "face similar capacity-dependent vulnerabilities" 这种 implicit 类比
+    措辞，导致 R11 没抓到 elaborator 把 USM 语音模型当主弹药）。LLM 自己判
+    is_cross_domain，cost +¥0.05 / call 换准确度。
+
     Args:
         proposal: 通常是 tournament top-1
         llm: 推荐 cheap-mid（attacker prompt 不长）
-        skip_if_no_cross_domain_keyword: True (默认) 时先 regex 探测；命中才调 LLM。
-            False 时强制跑 LLM (用于测试或生产 paranoid mode)
+        skip_if_no_cross_domain_keyword: False (默认) 始终调 LLM；True 时先用
+            regex pre-filter 命中才调（cost-conscious mode，可能漏 implicit 类比）
 
     Returns:
         MechanismAlignment 或 None（LLM 失败 / 预过滤跳过）
     """
-    # Pre-filter: 仅 motivation 含 cross-domain 关键词时调 LLM
+    # Pre-filter (opt-in): 仅 motivation 含 cross-domain 关键词时调 LLM
     if skip_if_no_cross_domain_keyword:
         if not _detect_cross_domain(proposal.motivation, proposal.proposed_method):
             print(
-                "[mechanism_alignment] skip: motivation 未检出 cross-domain 关键词",
+                "[mechanism_alignment] skip: motivation 未检出 cross-domain 关键词 "
+                "(opt-in pre-filter)",
                 file=sys.stderr,
             )
             return MechanismAlignment(
                 is_cross_domain=False,
                 overall_verdict="not_applicable",
-                recommendation="(无 cross-domain 类比 — 跳过)",
+                recommendation="(无 cross-domain 类比 — pre-filter 跳过)",
             )
 
     user_msg = (

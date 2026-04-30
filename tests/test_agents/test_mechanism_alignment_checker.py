@@ -94,6 +94,63 @@ class TestDetectCrossDomain:
             "Inspired by surface code decoders, SSMF...",
         )
 
+    # R13: implicit patterns（v3 LIVE 漏抓的措辞）
+
+    def test_face_similar_implicit(self):
+        """v3 LIVE 实测漏抓的 case：'face similar capacity-dependent vulnerabilities'"""
+        assert _detect_cross_domain(
+            "encrypted traffic models face similar capacity-dependent "
+            "vulnerabilities under concept drift",
+            "",
+        )
+
+    def test_exhibit_similar_implicit(self):
+        assert _detect_cross_domain("transformers exhibit similar attention patterns", "")
+
+    def test_suffer_similar_implicit(self):
+        assert _detect_cross_domain("larger models suffer similar degradation", "")
+
+    def test_same_mechanism_applies_implicit(self):
+        assert _detect_cross_domain(
+            "We argue the same mechanism applies in network classification", "",
+        )
+
+    def test_parallel_observation_implicit(self):
+        assert _detect_cross_domain(
+            "We make parallel observations on encrypted traffic", "",
+        )
+
+    def test_analogous_behavior_implicit(self):
+        assert _detect_cross_domain(
+            "Networks exhibit analogous behavior to attention layers", "",
+        )
+
+    def test_as_shown_in_we_hypothesize_implicit(self):
+        """间接 transfer 措辞：'as shown in [paper], we hypothesize ...'"""
+        assert _detect_cross_domain(
+            "As shown in arxiv:2303.01037, we hypothesize that traffic models "
+            "exhibit comparable degradation",
+            "",
+        )
+
+    def test_we_hypothesize_similar_implicit(self):
+        assert _detect_cross_domain(
+            "we hypothesize traffic classifiers will show similar capacity scaling", "",
+        )
+
+    def test_chinese_implicit(self):
+        assert _detect_cross_domain("我们认为同样的机制适用于加密流量", "")
+        assert _detect_cross_domain("观察到平行观察现象", "")
+
+    def test_pure_extends_no_trigger_against_implicit(self):
+        """同领域 incremental 不应被 implicit pattern 误触发"""
+        # "extends EAGLE" / "improves acceptance" 不含 implicit 暗示
+        assert not _detect_cross_domain(
+            "We extend EAGLE by adding a new draft selection heuristic that "
+            "improves acceptance rate by 12% on standard benchmarks.",
+            "",
+        )
+
 
 # ---------------------------------------------------------------------------
 # _parse_dimensions
@@ -202,17 +259,39 @@ class TestDeriveOverall:
 # ---------------------------------------------------------------------------
 
 class TestCheckEndToEnd:
-    def test_skip_filter_when_no_keyword(self):
-        """incremental work 不调 LLM，直接返 not_applicable"""
+    def test_skip_filter_when_no_keyword_opt_in(self):
+        """R13: pre-filter 改为 opt-in。显式 skip_if_no_cross_domain_keyword=True
+        时无关键词不调 LLM。"""
         p = _proposal(motivation="LayerSkip extends EAGLE acceptance rate by 12%")
         with patch(
             "darwinian.agents.mechanism_alignment_checker.invoke_with_retry"
         ) as mock_llm:
-            ma = check_mechanism_alignment(p, MagicMock())
+            ma = check_mechanism_alignment(
+                p, MagicMock(), skip_if_no_cross_domain_keyword=True,
+            )
         assert mock_llm.call_count == 0
         assert ma is not None
         assert ma.is_cross_domain is False
         assert ma.overall_verdict == "not_applicable"
+
+    def test_default_always_runs_llm(self):
+        """R13: 默认 skip_if_no_cross_domain_keyword=False，无关键词也调 LLM"""
+        p = _proposal(motivation="LayerSkip extends EAGLE acceptance rate by 12%")
+        payload = {
+            "is_cross_domain": False,
+            "source_domain": "", "target_domain": "",
+            "dimensions": [],
+            "overall_verdict": "not_applicable",
+            "recommendation": "no analogy",
+        }
+        mock_resp = MagicMock(content=_json.dumps(payload))
+        with patch(
+            "darwinian.agents.mechanism_alignment_checker.invoke_with_retry",
+            return_value=mock_resp,
+        ) as mock_llm:
+            ma = check_mechanism_alignment(p, MagicMock())   # 用默认值
+        assert mock_llm.call_count == 1
+        assert ma.is_cross_domain is False
 
     def test_force_run_when_filter_disabled(self):
         """skip_if_no_cross_domain_keyword=False 时强制调 LLM"""

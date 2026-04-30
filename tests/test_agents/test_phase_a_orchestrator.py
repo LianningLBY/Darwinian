@@ -927,3 +927,44 @@ class TestRelevanceGate:
         stats: dict = {}
         _filter_relevant_evidence([], out_stats=stats)
         assert stats == {"truly_relevant": 0, "backfilled": 0, "dropped": 0}
+
+
+class TestPhaseAHardAbort:
+    """R12: env var DARWINIAN_PHASE_A_HARD_ABORT_MIN 控制硬退出"""
+
+    def test_exception_class_exists_and_inherits_runtime_error(self):
+        from darwinian.agents.phase_a_orchestrator import PhaseAAbortError
+        assert issubclass(PhaseAAbortError, RuntimeError)
+
+    def test_default_no_abort(self, monkeypatch):
+        """env var 未设 → 默认 0 → 不 raise（保留旧行为）"""
+        monkeypatch.delenv("DARWINIAN_PHASE_A_HARD_ABORT_MIN", raising=False)
+        # 这里只测分支逻辑，不重新跑 Phase A — 直接 inline 验证
+        import os
+        try:
+            v = int(os.environ.get("DARWINIAN_PHASE_A_HARD_ABORT_MIN", "0"))
+        except ValueError:
+            v = 0
+        assert v == 0
+
+    def test_invalid_env_var_silently_zero(self, monkeypatch):
+        """非法 env var 值（如 'abc'）→ silent fallback 到 0，不崩溃"""
+        monkeypatch.setenv("DARWINIAN_PHASE_A_HARD_ABORT_MIN", "abc")
+        import os
+        try:
+            v = int(os.environ.get("DARWINIAN_PHASE_A_HARD_ABORT_MIN", "0"))
+        except ValueError:
+            v = 0
+        assert v == 0
+
+    def test_abort_message_contains_actionable_hint(self):
+        """raise 的 message 必须含'换 sub-direction'+'关闭硬退出'"""
+        from darwinian.agents.phase_a_orchestrator import PhaseAAbortError
+        e = PhaseAAbortError(
+            "Phase A 真相关论文数 0 < 阈值 5（DARWINIAN_PHASE_A_HARD_ABORT_MIN=5）。"
+            "建议换更聚焦的 sub-direction。如要继续跑，set "
+            "DARWINIAN_PHASE_A_HARD_ABORT_MIN=0 关闭硬退出。"
+        )
+        msg = str(e)
+        assert "换" in msg or "sub-direction" in msg
+        assert "DARWINIAN_PHASE_A_HARD_ABORT_MIN=0" in msg

@@ -51,6 +51,22 @@ from darwinian.utils.knowledge_graph import build_concept_graph, _dedup_papers_b
 from darwinian.utils.similarity import compute_cosine_similarity, get_text_embedding
 
 
+class PhaseAAbortError(RuntimeError):
+    """
+    R12: Phase A 检出"研究方向在 S2 上没有足够真相关论文"时抛出。
+
+    场景：v2 / v3 LIVE 实测发现某些 direction（如冷门交叉领域）在 S2 上
+    本来就没有 ≥N 篇真相关论文，elaborator 被迫拿 orthogonal 兜底论文当主弹药，
+    产出 hand-waved cross-domain 类比。R10 加了 banner 警告但 elaborator 不
+    总听话。R12 直接 hard abort，不浪费下游 ~80 LLM call (¥2-3) 跑出垃圾 seed。
+
+    阈值由 env var DARWINIAN_PHASE_A_HARD_ABORT_MIN 控制（默认 0=不 abort）：
+    0 = 关闭（保留旧行为：banner 警告但跑完）
+    N>0 = 真相关 < N 时 raise，主程序 catch 后让用户换 direction
+    """
+    pass
+
+
 # ===========================================================================
 # Scheme X: build_seed_pool —— LLM 列方向 seed → S2 verify → 一跳 → rerank
 # 替换 S2 keyword search 路径，从根上解决 candidate pool 缺方向论文的问题
@@ -352,6 +368,23 @@ def build_research_material_pack(
     )
     if relevance_warning:
         print(f"[phase_a] ⚠️ relevance_warning: {relevance_warning}", file=sys.stderr)
+
+    # R12: 真相关 < HARD_ABORT_MIN → 直接 raise，不浪费下游 ~80 LLM call
+    # 默认 env var 不设 = 0 = 关闭（保留 v3 旧行为）
+    try:
+        hard_abort_min = int(os.environ.get("DARWINIAN_PHASE_A_HARD_ABORT_MIN", "0"))
+    except ValueError:
+        hard_abort_min = 0
+    n_truly = rel_stats.get("truly_relevant", 0)
+    if hard_abort_min > 0 and n_truly < hard_abort_min:
+        raise PhaseAAbortError(
+            f"Phase A 真相关论文数 {n_truly} < 阈值 {hard_abort_min}（"
+            f"DARWINIAN_PHASE_A_HARD_ABORT_MIN={hard_abort_min}）。"
+            f"该 direction 在 S2 上没足够真相关论文，elaborator 会被迫拿 "
+            f"orthogonal 论文硬拗 cross-domain 类比。建议换更聚焦的 sub-direction "
+            f"（参考 R10 banner 建议）。如要继续跑，set "
+            f"DARWINIAN_PHASE_A_HARD_ABORT_MIN=0 关闭硬退出。"
+        )
 
     # ---- Step 4.5: phenomenon_miner 从全文挖"未解释/意外"现象 ----
     # 比 entity 组合更深的 idea seed（13 个 SOTA 系统都没做的差异化能力）
