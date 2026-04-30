@@ -619,6 +619,13 @@ class ResearchProposal(BaseModel):
                     "'⚠️ Mechanism Alignment' section。",
     )
 
+    # ---- R19 Proposal Debater (Advocate / Challenger / Judge) ----
+    # 仅 top-1 proposal 跑，多轮 debate 后给中稿率 + 修订建议
+    debate_result: DebateResult | None = Field(
+        default=None,
+        description="R19 三方辩论结果，None 表示未跑。存在时渲染 ⚖️ Debate section",
+    )
+
     # ---- Spot-check: 不在 paper_evidence.quantitative_claims 里的可疑数字 ----
     # （Pri-4: v9 实测 motivation 写 '27% reduction' 但 evidence 里没有 27%，
     # LLM 自己算/编了一个数字）

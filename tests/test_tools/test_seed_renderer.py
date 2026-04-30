@@ -245,6 +245,82 @@ class TestNoveltySection:
         assert "ours measures per-layer cliff" in md
 
 
+class TestDebateSection:
+    """R19: Debate result 渲染"""
+
+    def _dr(self):
+        from darwinian.state import DebateResult, DebateRound
+        return DebateResult(
+            rounds=[
+                DebateRound(
+                    round_number=1,
+                    advocate_argument="Strong novelty due to recall-vs-forecasting framing",
+                    challenger_argument="ACD-WFP 2024 may overlap",
+                    judge_assessment="ACD-WFP is partial overlap, not full",
+                    estimated_acceptance_rate=0.30,
+                    revisions_proposed=["use ISCXVPN2016 instead"],
+                ),
+                DebateRound(
+                    round_number=2,
+                    advocate_argument="Refined with ISCXVPN2016",
+                    challenger_argument="Still need to address scope",
+                    judge_assessment="scope concern partial",
+                    estimated_acceptance_rate=0.32,
+                    revisions_proposed=["narrow to single primary claim"],
+                ),
+            ],
+            final_acceptance_rate=0.32,
+            acceptance_threshold=0.30,
+            convergence_delta=0.05,
+            converged=True,
+        )
+
+    def test_no_debate_no_section(self):
+        p = _minimal_proposal()
+        md = render_proposal(p)
+        assert "Proposal Debate" not in md
+
+    def test_empty_rounds_no_section(self):
+        from darwinian.state import DebateResult
+        empty = DebateResult(rounds=[])
+        p = _minimal_proposal(debate_result=empty)
+        md = render_proposal(p)
+        assert "Proposal Debate" not in md
+
+    def test_renders_full_debate(self):
+        p = _minimal_proposal(debate_result=self._dr())
+        md = render_proposal(p)
+        assert "## ⚖️ Proposal Debate" in md
+        assert "0.32" in md
+        assert "converged" in md
+        assert "0.30 → 0.32" in md
+        assert "Round 1" in md
+        assert "Round 2" in md
+        assert "🟦 Advocate" in md
+        assert "🟥 Challenger" in md
+        assert "⚖️ Judge" in md
+        assert "ISCXVPN2016" in md
+        assert "narrow to single" in md
+
+    def test_not_converged_shows_red(self):
+        from darwinian.state import DebateResult, DebateRound
+        dr = DebateResult(
+            rounds=[
+                DebateRound(
+                    round_number=1, advocate_argument="weak",
+                    challenger_argument="strong", judge_assessment="weak",
+                    estimated_acceptance_rate=0.10,
+                ),
+            ],
+            final_acceptance_rate=0.10,
+            converged=False,
+        )
+        p = _minimal_proposal(debate_result=dr)
+        md = render_proposal(p)
+        assert "🔴" in md
+        assert "not converged" in md
+
+
 class TestMechanismAlignmentSection:
     """R11: Mechanism Alignment Checker 渲染"""
 

@@ -11,6 +11,7 @@ Seed Renderer：把 ResearchProposal 渲染成 QuantSkip 风格的 seed.md。
 from __future__ import annotations
 
 from darwinian.state import (
+    DebateResult,
     FeasibilityChallenge,
     MechanismAlignment,
     NoveltyAssessment,
@@ -97,6 +98,10 @@ def render_proposal(
     # 仅 cross-domain 类比的 proposal 才渲染（避免 not_applicable 的空 section）
     if proposal.mechanism_alignment is not None and proposal.mechanism_alignment.is_cross_domain:
         parts.append(_render_mechanism_alignment(proposal.mechanism_alignment))
+
+    # ---- Proposal Debater 结果 (R19) ----
+    if proposal.debate_result is not None and proposal.debate_result.rounds:
+        parts.append(_render_debate(proposal.debate_result))
 
     # ---- Spot-check audit hint (Pri-4) ----
     if proposal.unverified_numbers:
@@ -323,6 +328,40 @@ def _render_mechanism_alignment(ma: MechanismAlignment) -> str:
         icon = dim_icon.get(d.verdict, "")
         label = dim_label.get(d.dimension, d.dimension)
         parts.append(f"- {icon} **{label}** [{d.verdict}]: {d.explanation}\n")
+    return "".join(parts)
+
+
+def _render_debate(dr: DebateResult) -> str:
+    """
+    渲染 R19 三方辩论结果。
+
+    展示每轮 advocate / challenger / judge 论点 + 中稿率走势 + 最终修订建议。
+    """
+    converged_icon = "🟢" if dr.converged else "🔴"
+    parts = ["\n\n## ⚖️ Proposal Debate (R19 advocate vs challenger)\n\n"]
+    parts.append(
+        f"**Final acceptance rate**: {converged_icon} `{dr.final_acceptance_rate:.2f}` "
+        f"(threshold {dr.acceptance_threshold:.2f}, "
+        f"{'converged' if dr.converged else 'not converged'})\n\n"
+    )
+    parts.append(f"**Rounds**: {len(dr.rounds)}\n\n")
+    parts.append("**Rate trajectory**: " + " → ".join(
+        f"{r.estimated_acceptance_rate:.2f}" for r in dr.rounds
+    ) + "\n\n")
+
+    for r in dr.rounds:
+        parts.append(f"### Round {r.round_number} (rate={r.estimated_acceptance_rate:.2f})\n\n")
+        parts.append("**🟦 Advocate**:\n\n")
+        parts.append(f"> {r.advocate_argument}\n\n")
+        parts.append("**🟥 Challenger**:\n\n")
+        parts.append(f"> {r.challenger_argument}\n\n")
+        parts.append("**⚖️ Judge**:\n\n")
+        parts.append(f"> {r.judge_assessment}\n\n")
+        if r.revisions_proposed:
+            parts.append("**Judge 修订建议**:\n\n")
+            for rev in r.revisions_proposed:
+                parts.append(f"- {rev}\n")
+            parts.append("\n")
     return "".join(parts)
 
 

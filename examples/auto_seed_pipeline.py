@@ -185,6 +185,21 @@ def main() -> None:
     else:
         print(f"[auto_seed] R11 失败（LLM error），跳过", file=sys.stderr)
 
+    # ---- R19: Proposal Debater (advocate vs challenger vs judge, 多轮) ----
+    from darwinian.agents.proposal_debater import debate_proposal
+    print(f"[auto_seed] R19 启动 —— Proposal Debate (advocate vs challenger)",
+          file=sys.stderr)
+    dr = debate_proposal(top_proposal, llm=extractor_llm, max_rounds=2)
+    if dr.rounds:
+        top_proposal.debate_result = dr
+        print(
+            f"[auto_seed] R19 完成: {len(dr.rounds)} 轮, "
+            f"final_rate={dr.final_acceptance_rate:.2f}, converged={dr.converged}",
+            file=sys.stderr,
+        )
+    else:
+        print(f"[auto_seed] R19 跳过（debate 全失败）", file=sys.stderr)
+
     md = render_proposal(top_proposal, material_pack=pack)
     md += "\n\n" + render_tournament_overview(tournament, boosted_proposals)
     print(md)

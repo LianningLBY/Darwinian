@@ -851,6 +851,30 @@ class TestBuildSeedPool:
         assert pool == []
 
 
+class TestR18BenchmarkInPrompt:
+    """R18: _LLM_KEYWORDS_PROMPT 必须强制 LLM 列 benchmark/dataset 名"""
+
+    def test_prompt_mentions_benchmark_requirement(self):
+        from darwinian.agents.phase_a_orchestrator import _LLM_KEYWORDS_PROMPT
+        assert "benchmark" in _LLM_KEYWORDS_PROMPT.lower()
+        assert "dataset" in _LLM_KEYWORDS_PROMPT.lower()
+
+    def test_prompt_lists_concrete_dataset_examples(self):
+        """prompt 必须列出真实 benchmark 名作 few-shot"""
+        from darwinian.agents.phase_a_orchestrator import _LLM_KEYWORDS_PROMPT
+        # 加密流量真实 benchmark
+        assert "ISCXVPN2016" in _LLM_KEYWORDS_PROMPT
+        assert "CICIDS-2017" in _LLM_KEYWORDS_PROMPT
+        # 其他领域真实 benchmark（防 LLM 只学到加密流量这一个领域）
+        assert "MoleculeNet" in _LLM_KEYWORDS_PROMPT
+        assert "MMLU" in _LLM_KEYWORDS_PROMPT or "GSM8K" in _LLM_KEYWORDS_PROMPT
+
+    def test_prompt_explicit_min_benchmark_count(self):
+        """prompt 必须强制 ≥2 组 benchmark query"""
+        from darwinian.agents.phase_a_orchestrator import _LLM_KEYWORDS_PROMPT
+        assert "≥2" in _LLM_KEYWORDS_PROMPT or ">= 2" in _LLM_KEYWORDS_PROMPT
+
+
 class TestR17KeywordStrategy:
     """R17: 默认 keyword 策略 — LLM 列 search queries → S2 search → 合并去重 → rerank"""
 
